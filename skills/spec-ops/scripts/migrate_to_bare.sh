@@ -24,9 +24,9 @@
 set -euo pipefail
 export GIT_OPTIONAL_LOCKS=0   # never let status refresh the index behind our back
 
-readonly TMP_NAME=.sar-migrate-tmp
-readonly BRANCH_PREFIX=${SAR_BRANCH_PREFIX:-sar/}
-readonly STAGE_PREFIX=${SAR_STAGE_PREFIX:-sar-stage/}
+readonly TMP_NAME=.so-migrate-tmp
+readonly BRANCH_PREFIX=${SO_BRANCH_PREFIX:-so/}
+readonly STAGE_PREFIX=${SO_STAGE_PREFIX:-so-stage/}
 readonly MIN_GIT_MAJOR=2 MIN_GIT_MINOR=31
 # Keep in sync with wt.sh.
 readonly AGENT_CONFIG=(CLAUDE.md AGENTS.md GEMINI.md .claude .agents .codex .gemini)
@@ -135,7 +135,7 @@ inspect() {
 
   while IFS=$'\t' read -r path branch prunable; do
     if [[ $branch == "$BRANCH_PREFIX"* || $branch == "$STAGE_PREFIX"* ]]; then
-      BLOCKERS+=("worktree of an earlier SAR run still exists: $path ($branch); finish or remove it first")
+      BLOCKERS+=("worktree of an earlier spec-ops run still exists: $path ($branch); finish or remove it first")
     elif ((prunable)); then
       WARNINGS+=("stale worktree entry $path (git worktree prune removes it)")
     else

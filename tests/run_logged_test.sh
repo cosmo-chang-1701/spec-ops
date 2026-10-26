@@ -17,8 +17,8 @@ check_eq "command's exit code kept" "$rc" 3
 check "summary reports exit=3" grep -q '^exit=3 lines=1001 ' <<<"$out"
 check_eq "summary + marker + default 40-line tail" "$(wc -l <<<"$out")" 42
 check_eq "tail ends with the error" "$(tail -n 1 <<<"$out")" boom
-out=$(SAR_LOG_TAIL=5 bash "$R" "$WORK/logs/fail.log" 'seq 1 100; exit 1')
-check_eq "SAR_LOG_TAIL limits the tail" "$(wc -l <<<"$out")" 7
+out=$(SO_LOG_TAIL=5 bash "$R" "$WORK/logs/fail.log" 'seq 1 100; exit 1')
+check_eq "SO_LOG_TAIL limits the tail" "$(wc -l <<<"$out")" 7
 check_eq "log replaced, not appended" "$(wc -l <"$WORK/logs/fail.log")" 100
 
 section "command semantics"
@@ -33,7 +33,7 @@ check "relative log path resolved" test -f "$WORK/rel.log"
 section "usage"
 bash "$R" "$WORK/x.log" >/dev/null 2>&1; rc=$?
 check_eq "missing command: exit 2" "$rc" 2
-SAR_LOG_TAIL=abc bash "$R" "$WORK/x.log" true >/dev/null 2>&1; rc=$?
-check_eq "bad SAR_LOG_TAIL: exit 2" "$rc" 2
+SO_LOG_TAIL=abc bash "$R" "$WORK/x.log" true >/dev/null 2>&1; rc=$?
+check_eq "bad SO_LOG_TAIL: exit 2" "$rc" 2
 
 finish

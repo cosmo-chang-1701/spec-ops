@@ -3,8 +3,8 @@
 The **bare-repo worktree layout** keeps the git database in `<repo>/.bare/` and gives every
 branch its own sibling working directory, so several branches can be open at once without
 switching. `<repo>/.git` is a one-line file (`gitdir: ./.bare`) so git still works from the
-container root. SAR task and stage worktrees live in the same container (`sar/<slug>`,
-`sar-stage/<id>`).
+container root. spec-ops task and stage worktrees live in the same container (`so/<slug>`,
+`so-stage/<id>`).
 
 ```text
 <repo>/
@@ -12,7 +12,7 @@ container root. SAR task and stage worktrees live in the same container (`sar/<s
 ├── .git              file: gitdir: ./.bare
 ├── main/             worktree on the default branch (dir name = branch name)
 ├── feat/login/       a branch opened later with wt.sh add
-├── sar/<slug>/       Worker worktrees
+├── so/<slug>/       Worker worktrees
 └── .claude, AGENTS.md, …   symlinks to main/'s agent config (below)
 ```
 
@@ -49,7 +49,7 @@ layout itself with **this** repo's paths from the plan JSON.
    (staged state included). Every step is verified; any failure rolls back automatically.
 5. Every entry of `warnings` from this dry run, rephrased plainly.
 6. The choices: convert, or keep the current layout and continue. Mention that
-   `"offerBareLayout": false` in `.agents/spec-audit.json` stops the question for good.
+   `"offerBareLayout": false` in `.agents/spec-ops.json` stops the question for good.
 
 ### Example (repo `~/Projects/my-app`, default branch `main`)
 
@@ -72,7 +72,7 @@ layout itself with **this** repo's paths from the plan JSON.
 >                                │   ├── package.json
 >                                │   └── .env
 >                                ├── feat/login/     ← branches you open later
->                                └── sar/<task>/     ← Worker directories
+>                                └── so/<task>/     ← Worker directories
 > ```
 >
 > - **Changes**: the code moves from `~/Projects/my-app/` to `~/Projects/my-app/main/`.
@@ -90,7 +90,7 @@ layout itself with **this** repo's paths from the plan JSON.
 > 1. Convert
 > 2. Keep the current layout and continue
 >
-> To never be asked again, set `"offerBareLayout": false` in `.agents/spec-audit.json`.
+> To never be asked again, set `"offerBareLayout": false` in `.agents/spec-ops.json`.
 
 ### When the plan is blocked
 `eligible: false` (exit 1): do not ask. Tell the user in one short message that this repo
@@ -113,7 +113,7 @@ continue with the standard layout.
 
 ## What the conversion does
 All renames stay inside `<repo>`; nothing is copied or written outside it.
-1. Moves every top-level entry except `.git` into `<repo>/.sar-migrate-tmp/`.
+1. Moves every top-level entry except `.git` into `<repo>/.so-migrate-tmp/`.
 2. Renames `.git` to `.bare`, sets `core.bare = true`, writes the `.git` gitfile.
 3. Registers `<repo>/<branch>` with `git worktree add --no-checkout`, then moves the temp
    dir there and hands the old checkout's `index`, `ORIG_HEAD`, `config.worktree` and HEAD
@@ -137,8 +137,8 @@ All renames stay inside `<repo>`; nothing is copied or written outside it.
 | `index.lock` present | wait for the other git process, or remove a stale lock |
 | Submodules (`.gitmodules` or `.git/modules`) | not supported |
 | Sparse checkout | not supported |
-| Leftover `sar/*` / `sar-stage/*` worktrees | finish the earlier run or `worktree.sh remove` them |
-| `<repo>` not writable, a top-level dir you cannot write, a mount point, or `.sar-migrate-tmp` exists | fix permissions / unmount / remove the leftover |
+| Leftover `so/*` / `so-stage/*` worktrees | finish the earlier run or `worktree.sh remove` them |
+| `<repo>` not writable, a top-level dir you cannot write, a mount point, or `.so-migrate-tmp` exists | fix permissions / unmount / remove the leftover |
 
 ### Warnings (listed in the plan, never block)
 Open editors and processes · agent config files that move (`CLAUDE.md`, `AGENTS.md`,
@@ -164,7 +164,7 @@ done
 admin=$(sed -n 's/^gitdir: //p' main/.git)       # .bare/worktrees/main
 rm main/.git && mv "$admin/index" .bare/index && rm -rf "$admin"
 git --git-dir=.bare config core.bare false && rm .git && mv .bare main/.git
-mv main .sar-undo && (shopt -s dotglob && mv .sar-undo/* .) && rmdir .sar-undo
+mv main .so-undo && (shopt -s dotglob && mv .so-undo/* .) && rmdir .so-undo
 git status
 ```
 
@@ -172,9 +172,9 @@ git status
 `bash SKILL_DIR/scripts/wt.sh add|remove|list|status` manages everyday branch worktrees in
 this layout: `add <branch> [<base>]` creates `<repo>/<branch>` (existing branch as is,
 origin-only branch tracked, else a new branch from `origin/<default>`) and provisions it
-like SAR worktrees; `remove` refuses dirty worktrees without `--force` and keeps the branch;
+like spec-ops worktrees; `remove` refuses dirty worktrees without `--force` and keeps the branch;
 `status [-v|-s|--check]` shows every worktree's changes and upstream state; `link-config`
 re-syncs the agent-config symlinks at the root with the default-branch worktree (adds
 missing, re-points dangling, drops those whose target is gone; leaves real files and links
 pointing elsewhere alone). It refuses
-`sar/*` and `sar-stage/*` branches — those belong to `worktree.sh`. The Lead does not use it.
+`so/*` and `so-stage/*` branches — those belong to `worktree.sh`. The Lead does not use it.

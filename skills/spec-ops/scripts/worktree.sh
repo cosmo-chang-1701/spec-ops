@@ -4,9 +4,9 @@
 # Usage:
 #   worktree.sh config                        # effective repo config + resolved layout (JSON)
 #   worktree.sh path   <slug>                 # resolve target path (JSON), no side effects
-#   worktree.sh create <slug> [--base <ref>]  # add worktree on branch ${SAR_BRANCH_PREFIX:-sar/}<slug>
+#   worktree.sh create <slug> [--base <ref>]  # add worktree on branch ${SO_BRANCH_PREFIX:-so/}<slug>
 #   worktree.sh integrate <id> --base <ref> <branch>...
-#                                             # stage integration worktree on ${SAR_STAGE_PREFIX:-sar-stage/}<id>:
+#                                             # stage integration worktree on ${SO_STAGE_PREFIX:-so-stage/}<id>:
 #                                             # merges each branch (--no-ff) onto base; exit 1 on conflict
 #   worktree.sh remove <slug> [--force]       # remove worktree; delete branch only if merged
 #   worktree.sh remove --stage <id> [--force] # same, for a stage integration worktree
@@ -14,12 +14,12 @@
 #   worktree.sh status [--check]              # list + state, base, ahead, change counts (JSON lines);
 #                                             # --check exits 1 if any is dirty or missing
 #   worktree.sh provision <worktree>          # provision an existing worktree (see below)
-#   worktree.sh rundir [--archive]            # persistent run dir <git common dir>/sar-run (JSON);
-#                                             # --archive renames it to sar-run.<UTC timestamp>
+#   worktree.sh rundir [--archive]            # persistent run dir <git common dir>/so-run (JSON);
+#                                             # --archive renames it to so-run.<UTC timestamp>
 #
 # Built-in defaults per layout (no config needed):
 #   Bare container (<root>/.bare + <root>/<branch>/ worktrees, e.g. <root>/main):
-#     worktree dir = branch name: <root>/sar/<slug>, stages <root>/sar-stage/<id>
+#     worktree dir = branch name: <root>/so/<slug>, stages <root>/so-stage/<id>
 #     source worktree = the one on the default branch (bare HEAD, e.g. main/)
 #     default base    = origin/<default branch> if it exists, else <default branch>
 #   Standard repo (.git inside the main checkout):
@@ -27,23 +27,23 @@
 #     default base = HEAD
 #   Both: every new task/stage worktree is provisioned from the source worktree with its
 #     gitignored, untracked `.env` / `.env.*` files (copied, mode kept) and `.venv` dirs
-#     (symlinked). Disable with SAR_PROVISION=0. Paths not gitignored in the new
+#     (symlinked). Disable with SO_PROVISION=0. Paths not gitignored in the new
 #     worktree are skipped, so they never show up as changes or get committed.
 #
-# Optional overrides — .agents/spec-audit.json, first readable file wins:
-#   SAR_CONFIG env  →  <toplevel>/.agents/spec-audit.json  →  (bare layout only)
-#   <default-branch worktree>/.agents/spec-audit.json  →  <bare repo's parent>/.agents/spec-audit.json
-# Keys: worktreeRoot (env SAR_WORKTREE_ROOT wins; relative to the layout anchor),
+# Optional overrides — .agents/spec-ops.json, first readable file wins:
+#   SO_CONFIG env  →  <toplevel>/.agents/spec-ops.json  →  (bare layout only)
+#   <default-branch worktree>/.agents/spec-ops.json  →  <bare repo's parent>/.agents/spec-ops.json
+# Keys: worktreeRoot (env SO_WORKTREE_ROOT wins; relative to the layout anchor),
 #   pathStyle ("slug" | "branch"), defaultBase, sourceWorktree (relative to the anchor),
 #   provision ({"copy": [...], "link": [...], "copyMode": "644"} replaces auto-discovery),
 #   maxParallel (Worker cap read by the Lead, default 4), workerNotes (extra Worker rules),
 #   offerBareLayout (false = never offer migrate_to_bare.sh on a standard repo),
-#   autoMerge ("manual" | "low-risk" | "all", default "low-risk"; env SAR_AUTO_MERGE: what
+#   autoMerge ("manual" | "low-risk" | "all", default "low-risk"; env SO_AUTO_MERGE: what
 #   happens to a task's PR once it is open and its review is APPROVE), mergeMethod
-#   ("squash" | "merge" | "rebase", default "squash"; env SAR_MERGE_METHOD).
+#   ("squash" | "merge" | "rebase", default "squash"; env SO_MERGE_METHOD).
 #
 # Target root resolution (first hit wins):
-#   1. SAR_WORKTREE_ROOT env, or "worktreeRoot" in the repo config
+#   1. SO_WORKTREE_ROOT env, or "worktreeRoot" in the repo config
 #   2. Bare layout: $(dirname COMMON_DIR)
 #   3. Existing linked worktrees: if all share one root, reuse it ("branch" style strips
 #      the branch name from each path, "slug" style takes the parent dir).
@@ -51,19 +51,19 @@
 #      or under a dot-dir in $HOME, e.g. ~/.gemini/...) are ignored.
 #   4. Standard layout: $(dirname MAIN_WORKTREE)/worktrees/<repo>
 #
-# The fork-point commit is saved to <worktree git dir>/sar-base so check_scope.sh
+# The fork-point commit is saved to <worktree git dir>/so-base so check_scope.sh
 # can diff against it later.
 #
 # Before removing a worktree, `remove` runs `docker compose down` (volumes kept) for each
 # Compose project whose containers were all started from inside it, e.g. the dependency
 # services `docker compose run` leaves behind. A project that also has containers started
 # elsewhere (a name shared with the main checkout) is left running. Disable with
-# SAR_COMPOSE_DOWN=0; without docker or a reachable daemon this step is skipped.
+# SO_COMPOSE_DOWN=0; without docker or a reachable daemon this step is skipped.
 set -euo pipefail
 
-readonly BRANCH_PREFIX=${SAR_BRANCH_PREFIX:-sar/}
-readonly STAGE_PREFIX=${SAR_STAGE_PREFIX:-sar-stage/}
-readonly CONFIG_REL=.agents/spec-audit.json
+readonly BRANCH_PREFIX=${SO_BRANCH_PREFIX:-so/}
+readonly STAGE_PREFIX=${SO_STAGE_PREFIX:-so-stage/}
+readonly CONFIG_REL=.agents/spec-ops.json
 readonly MIN_GIT_MAJOR=2 MIN_GIT_MINOR=31   # --path-format=absolute
 
 die() { printf 'worktree: %s\n' "$*" >&2; exit 2; }
@@ -101,9 +101,9 @@ find_config() {
   local toplevel candidate
   local -a candidates=()
   CONFIG_FILE=""
-  if [[ -n ${SAR_CONFIG:-} ]]; then
-    [[ -r $SAR_CONFIG ]] || die "SAR_CONFIG is not readable: $SAR_CONFIG"
-    CONFIG_FILE=$SAR_CONFIG
+  if [[ -n ${SO_CONFIG:-} ]]; then
+    [[ -r $SO_CONFIG ]] || die "SO_CONFIG is not readable: $SO_CONFIG"
+    CONFIG_FILE=$SO_CONFIG
     return
   fi
   toplevel=$(git rev-parse --show-toplevel 2>/dev/null || true)
@@ -222,7 +222,7 @@ linked_worktrees() {
 }
 
 configured_root() {
-  local root=${SAR_WORKTREE_ROOT:-}
+  local root=${SO_WORKTREE_ROOT:-}
   [[ -n $root ]] || root=$(cfg worktreeRoot)
   [[ -n $root ]] || return 1
   anchor_path "$root"
@@ -288,7 +288,7 @@ provision_lists() {
     mapfile -t COPIES < <(cfg provision.copy)
     mapfile -t LINKS < <(cfg provision.link)
     COPY_MODE=$(cfg provision.copyMode)
-  elif [[ ${SAR_PROVISION:-1} == 0 ]]; then
+  elif [[ ${SO_PROVISION:-1} == 0 ]]; then
     PROVISION_FROM=disabled
     return 0
   else
@@ -316,7 +316,7 @@ provision() {
   PROVISIONED=""
   provision_lists
   if [[ $PROVISION_FROM == no-source ]]; then
-    warn "provision skipped: no source worktree found (set \"sourceWorktree\" in .agents/spec-audit.json)"
+    warn "provision skipped: no source worktree found (set \"sourceWorktree\" in .agents/spec-ops.json)"
     return 0
   fi
   for rel in "${COPIES[@]}"; do [[ -n $rel ]] && provision_one copy "$wt" "$rel" "$COPY_MODE"; done
@@ -355,7 +355,7 @@ prune_empty_parents() {
 # compose_down <worktree>: stops Compose projects started only from inside the worktree.
 compose_down() {
   local wt=$1 rows project dir
-  [[ ${SAR_COMPOSE_DOWN:-1} != 0 ]] && command -v docker >/dev/null || return 0
+  [[ ${SO_COMPOSE_DOWN:-1} != 0 ]] && command -v docker >/dev/null || return 0
   rows=$(docker ps -a --filter label=com.docker.compose.project \
     --format '{{.Label "com.docker.compose.project"}}{{"\t"}}{{.Label "com.docker.compose.project.working_dir"}}' \
     2>/dev/null) || return 0
@@ -390,7 +390,7 @@ cmd_config() {
     "$SOURCE_WORKTREE" "$ROOT_DIR" "$RESOLVED_BY" "$PATH_STYLE" "$DEFAULT_BRANCH" \
     "$DEFAULT_BASE" "$BRANCH_PREFIX" "$STAGE_PREFIX" "$PROVISION_FROM" "$COPY_MODE" \
     "$(printf '%s\n' "${COPIES[@]}")" "$(printf '%s\n' "${LINKS[@]}")" \
-    "${SAR_AUTO_MERGE:-}" "${SAR_MERGE_METHOD:-}" <<'PY'
+    "${SO_AUTO_MERGE:-}" "${SO_MERGE_METHOD:-}" <<'PY'
 import json, sys
 (config, layout, repo, anchor, main_wt, source, root, resolved_by, path_style,
  default_branch, default_base, branch_prefix, stage_prefix, provision_from, copy_mode,
@@ -406,9 +406,9 @@ def choice(key, env_name, env_value, allowed, default):
         sys.exit(2)
     return value
 
-auto_merge = choice("autoMerge", "SAR_AUTO_MERGE", env_auto_merge,
+auto_merge = choice("autoMerge", "SO_AUTO_MERGE", env_auto_merge,
                     ("manual", "low-risk", "all"), "low-risk")
-merge_method = choice("mergeMethod", "SAR_MERGE_METHOD", env_merge_method,
+merge_method = choice("mergeMethod", "SO_MERGE_METHOD", env_merge_method,
                       ("squash", "merge", "rebase"), "squash")
 offer_bare = layout == "standard" and data.get("offerBareLayout", True) is not False
 print(json.dumps({
@@ -463,7 +463,7 @@ cmd_create() {
 
   mkdir -p "$(dirname "$WORKTREE_PATH")"
   git worktree add --quiet -b "$branch" "$WORKTREE_PATH" "$base_sha" >&2
-  printf '%s\n' "$base_sha" >"$(git -C "$WORKTREE_PATH" rev-parse --absolute-git-dir)/sar-base"
+  printf '%s\n' "$base_sha" >"$(git -C "$WORKTREE_PATH" rev-parse --absolute-git-dir)/so-base"
   provision "$WORKTREE_PATH"
   emit_json "$branch" ",\"base\":\"$base_sha\",\"provisioned\":[$PROVISIONED]"
 }
@@ -494,7 +494,7 @@ cmd_integrate() {
 
   mkdir -p "$(dirname "$WORKTREE_PATH")"
   git worktree add --quiet -b "$branch" "$WORKTREE_PATH" "$base_sha" >&2
-  printf '%s\n' "$base_sha" >"$(git -C "$WORKTREE_PATH" rev-parse --absolute-git-dir)/sar-base"
+  printf '%s\n' "$base_sha" >"$(git -C "$WORKTREE_PATH" rev-parse --absolute-git-dir)/so-base"
   provision "$WORKTREE_PATH"
 
   for b in "${branches[@]}"; do
@@ -565,8 +565,8 @@ cmd_list() {
   done
 }
 
-# Prints "<kind> <slug>" for a SAR branch; fails for any other branch.
-sar_kind() {
+# Prints "<kind> <slug>" for a spec-ops branch; fails for any other branch.
+so_kind() {
   if [[ $1 == "$STAGE_PREFIX"* ]]; then printf 'stage %s\n' "${1#"$STAGE_PREFIX"}"
   elif [[ $1 == "$BRANCH_PREFIX"* ]]; then printf 'task %s\n' "${1#"$BRANCH_PREFIX"}"
   else return 1
@@ -584,13 +584,13 @@ cmd_status() {
     esac
   done
   while IFS=$'\t' read -r path branch prunable; do
-    read -r kind name < <(sar_kind "$branch") || continue
+    read -r kind name < <(so_kind "$branch") || continue
     head=null base=null ahead=null staged=0 unstaged=0 untracked=0 conflicts=0
     if ((prunable)) || [[ ! -d $path ]]; then
       state=missing
     else
       head="\"$(git -C "$path" rev-parse --short HEAD)\""
-      base_file="$(git -C "$path" rev-parse --absolute-git-dir)/sar-base"
+      base_file="$(git -C "$path" rev-parse --absolute-git-dir)/so-base"
       if [[ -r $base_file ]]; then
         base="\"$(<"$base_file")\""
         ahead=$(git -C "$path" rev-list --count "$(<"$base_file")..HEAD")
@@ -628,7 +628,7 @@ cmd_provision() {
 # git common dir: outside every work tree (no effect on baselines or scope gates), shared by
 # all worktrees, and kept across agent sessions.
 cmd_rundir() {
-  local archive=0 dir=$COMMON_DIR/sar-run target
+  local archive=0 dir=$COMMON_DIR/so-run target
   while (($#)); do
     case $1 in
       --archive) archive=1; shift ;;

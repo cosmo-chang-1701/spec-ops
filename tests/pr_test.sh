@@ -21,10 +21,10 @@ case "$1 $2" in
     case ${GH_CHECKS:-pass} in
       pass) exit 0 ;;
       fail) echo "build  fail"; exit 1 ;;
-      none) echo "no checks reported on the 'sar/task' branch"; exit 1 ;;
+      none) echo "no checks reported on the 'so/task' branch"; exit 1 ;;
       none-then-pass)
         n=$(cat "$GH_LOG.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$GH_LOG.n"
-        if ((n == 0)); then echo "no checks reported on the 'sar/task' branch"; exit 1; fi
+        if ((n == 0)); then echo "no checks reported on the 'so/task' branch"; exit 1; fi
         exit 0 ;;
     esac ;;
   "pr merge") [[ ${GH_MERGE:-ok} == refuse ]] && { echo "Pull request is not mergeable"; exit 1; }; exit 0 ;;
@@ -40,7 +40,7 @@ pr() {
   local -a vars=()
   while [[ $1 != -- ]]; do vars+=("$1"); shift; done
   shift
-  (cd "$dir" && env PATH="$WORK/ghshim:$PATH" SAR_PR_CHECKS_DELAY=0 "${vars[@]}" bash "$P" "$@")
+  (cd "$dir" && env PATH="$WORK/ghshim:$PATH" SO_PR_CHECKS_DELAY=0 "${vars[@]}" bash "$P" "$@")
 }
 
 std=$(make_repo std)
@@ -69,17 +69,17 @@ check_eq "no origin: exit 1" "$rc" 1
 
 section "open"
 t=$(cd "$std" && bash "$W" create task 2>/dev/null | json_get '["worktree_path"]')
-branch=sar/task
-out=$(pr "$std" -- open "$t" --title "sar(task): x" --body-file "$body"); rc=$?
+branch=so/task
+out=$(pr "$std" -- open "$t" --title "so(task): x" --body-file "$body"); rc=$?
 check_eq "no commit yet: exit 1" "$rc" 1
 check_eq "no commit yet: reason" "$(json_get '["reason"]' <<<"$out")" nothing-to-pr
 echo change >>"$t/a.txt"
-out=$(pr "$std" -- open "$t" --title "sar(task): x" --body-file "$body"); rc=$?
+out=$(pr "$std" -- open "$t" --title "so(task): x" --body-file "$body"); rc=$?
 check_eq "dirty worktree: exit 1" "$rc" 1
 check_eq "dirty worktree: reason" "$(json_get '["reason"]' <<<"$out")" dirty
-git -C "$t" commit -qam "sar(task): change"
+git -C "$t" commit -qam "so(task): change"
 : >"$GH_LOG"
-out=$(pr "$std" -- open "$t" --title "sar(task): x" --body-file "$body"); rc=$?
+out=$(pr "$std" -- open "$t" --title "so(task): x" --body-file "$body"); rc=$?
 check_eq "open: exit 0" "$rc" 0
 check_eq "open: PR url" "$(json_get '["pr"]' <<<"$out")" https://example.test/pull/7
 check_eq "open: not reused" "$(json_get '["reused"]' <<<"$out")" False
@@ -95,11 +95,11 @@ check "existing PR: no gh pr create" bash -c "! grep -q 'pr create' '$GH_LOG'"
 # A task whose base is a local commit nobody pushed.
 echo local >>"$std/a.txt" && git -C "$std" commit -qam "local only"
 t2=$(cd "$std" && bash "$W" create task-two 2>/dev/null | json_get '["worktree_path"]')
-echo two >"$t2/two.txt" && git -C "$t2" add -A && git -C "$t2" commit -qm "sar(task-two): two"
+echo two >"$t2/two.txt" && git -C "$t2" add -A && git -C "$t2" commit -qm "so(task-two): two"
 out=$(pr "$std" -- open "$t2" --title x --body-file "$body"); rc=$?
 check_eq "base not on origin: exit 1" "$rc" 1
 check_eq "base not on origin: reason" "$(json_get '["reason"]' <<<"$out")" base-not-on-main
-check "base not on origin: nothing pushed" bash -c "! git -C '$up' rev-parse --verify -q refs/heads/sar/task-two"
+check "base not on origin: nothing pushed" bash -c "! git -C '$up' rev-parse --verify -q refs/heads/so/task-two"
 out=$(pr "$std" -- open "$t2" --title x --body-file "$body" --base origin/main); rc=$?
 check_eq "--base override: exit 0" "$rc" 0
 git -C "$std" reset -q --hard origin/main

@@ -64,7 +64,7 @@ Lead the report with what needs a human decision; put the detail last. Always in
 Below the matrix, one line on the session plan
 ([SKILL.md](../SKILL.md#sessions-and-context)), so the user can override it with the approval:
 `Session: single (auto — one L/M task)` or `Session: split (auto — 3 tasks)`; the source is
-`auto`, `always`, `never` (from `SAR_SESSION_SPLIT`) or `user`. Then one line on the PRs:
+`auto`, `always`, `never` (from `SO_SESSION_SPLIT`) or `user`. Then one line on the PRs:
 `PRs: open on APPROVE · merge low-risk (config) · squash · into main`, or
 `PRs: local commits only — <pr.sh preflight reason>` when `pr.sh preflight` failed.
 
@@ -76,17 +76,17 @@ that reaches beyond the files the findings name, and every unresolved `POSSIBLE`
 ```text
 Mode: staged · max parallel 4
 Stage 1 (base origin/main 1a2b3c4): fix-auth-token, add-rate-limit, drop-dead-helpers  [parallel]
-Stage 2 (base sar-stage/1):  migrate-callers ← fix-auth-token
-Stage 3 (base sar-stage/2):  drop-legacy-auth ← migrate-callers
-Inter-stage: local commits on sar/* and sar-stage/* branches, merges via worktree.sh integrate; no push
+Stage 2 (base so-stage/1):  migrate-callers ← fix-auth-token
+Stage 3 (base so-stage/2):  drop-legacy-auth ← migrate-callers
+Inter-stage: local commits on so/* and so-stage/* branches, merges via worktree.sh integrate; no push
 ```
 
 **④ Gap report and full specs**, with the run-dir path of each spec file.
 
 The approval is what authorises the Lead's commits, pushes and PRs, so state it explicitly and
 ask the user to approve it:
-- after APPROVE, `git commit` on the task's `sar/*` branch (for `staged`: the inter-stage local
-  commits and merges, and the PR from the last `sar-stage/<n>`), then push that branch and open
+- after APPROVE, `git commit` on the task's `so/*` branch (for `staged`: the inter-stage local
+  commits and merges, and the PR from the last `so-stage/<n>`), then push that branch and open
   a PR into the default branch;
 - for every task whose Merge is `auto`, merging that PR once its checks pass, with the
   configured method, and deleting the remote head branch.
@@ -96,8 +96,8 @@ locally only). It never covers removing worktrees or archiving the run dir; thos
 consent at close-out. Record the approval in `state.json` (§7) so a phase 2 session can rely on it.
 
 ### Auto-merge modes
-`auto_merge` in `worktree.sh config` (`autoMerge` in `.agents/spec-audit.json`, env
-`SAR_AUTO_MERGE`) sets what happens to a task's PR after it is opened. Every APPROVEd task gets
+`auto_merge` in `worktree.sh config` (`autoMerge` in `.agents/spec-ops.json`, env
+`SO_AUTO_MERGE`) sets what happens to a task's PR after it is opened. Every APPROVEd task gets
 a PR in all three modes.
 
 | Mode | PRs the Lead merges |
@@ -106,13 +106,13 @@ a PR in all three modes.
 | `low-risk` (default) | Tasks with Risk **L** that were approved in round 1 (never REQUEST_CHANGES, a failed gate included) and were not escalated to the `worker` model. |
 | `all` | Every task with Merge `auto`, i.e. all of them unless the user changed one. |
 
-Merge method: `merge_method` (`mergeMethod`, env `SAR_MERGE_METHOD`; default `squash`).
+Merge method: `merge_method` (`mergeMethod`, env `SO_MERGE_METHOD`; default `squash`).
 
 ## 4. Running a stage
 `independent` mode is a single stage without steps 4–6.
 
 1. **Create** — `worktree.sh create <slug> --base <stage base>` for each task in the stage
-   (stage 1: `default_base`, i.e. omit `--base`; stage *n*: `sar-stage/<n-1>`).
+   (stage 1: `default_base`, i.e. omit `--base`; stage *n*: `so-stage/<n-1>`).
    Stage 2+: dry-run each task's DoD in its new worktree (through `run_logged.sh`) and update
    the `# baseline:` notes
    per [worker-spec-template.md](worker-spec-template.md#dod-dry-run) before dispatching.
@@ -121,9 +121,9 @@ Merge method: `merge_method` (`mergeMethod`, env `SAR_MERGE_METHOD`; default `sq
    [review-checklist.md](review-checklist.md). Tasks loop independently (max 3 rounds each);
    a slow task does not reset or block the others' rounds.
 4. **Barrier + commit** — once every task in the stage is APPROVED, commit each worktree:
-   `git -C <wt> add -A && git -C <wt> commit -m "sar(<slug>): <goal>"`.
-5. **Integrate** — `worktree.sh integrate <n> --base <stage base> sar/<slug>...`.
-   It creates `sar-stage/<n>` in its own worktree and merges each branch with `--no-ff`.
+   `git -C <wt> add -A && git -C <wt> commit -m "so(<slug>): <goal>"`.
+5. **Integrate** — `worktree.sh integrate <n> --base <stage base> so/<slug>...`.
+   It creates `so-stage/<n>` in its own worktree and merges each branch with `--no-ff`.
    Exit 1 = merge conflict (conflicting files are listed): the whitelists overlapped after all,
    so fix the plan (re-split, or move a task to a later stage) and ask the user if specs change.
 6. **Integration gate** — in the stage worktree, re-run every DoD command of the stage
@@ -132,7 +132,7 @@ Merge method: `merge_method` (`mergeMethod`, env `SAR_MERGE_METHOD`; default `sq
    but break together. On failure, find the responsible task and send REQUEST_CHANGES to its
    Worker in its own worktree (counts toward its rounds); after APPROVE, commit again,
    `worktree.sh remove --stage <n> --force`, and re-run step 5.
-7. Only then create the next stage's worktrees on `sar-stage/<n>`. Each new worktree records
+7. Only then create the next stage's worktrees on `so-stage/<n>`. Each new worktree records
    that as its base, so `check_scope.sh` sees only the task's own changes. Before that, mark
    the stage `integrated` and advance `current_stage` in `state.json`; this is the point where
    the user may continue in a fresh session (`/clear`, then `resume`).
@@ -142,10 +142,10 @@ No question to the user; the checkpoint approval covers it. Per task, as soon as
 (use `run_logged.sh` for the `pr.sh` calls, logs `<slug>-pr-<step>.log`; the JSON is the last
 line):
 1. Re-run the baseline command; it must match, or stop and report (nothing is committed).
-2. `git -C <wt> add -A && git -C <wt> commit -m "sar(<slug>): <goal>"` → status `committed`.
+2. `git -C <wt> add -A && git -C <wt> commit -m "so(<slug>): <goal>"` → status `committed`.
 3. If `pr_enabled`: write `<run dir>/pr-<slug>.md` (goal, finding numbers, DoD commands with
    results, review summary, `Merge: auto|manual`) and run
-   `bash SKILL_DIR/scripts/pr.sh open <wt> --title "sar(<slug>): <goal>" --body-file <run dir>/pr-<slug>.md`
+   `bash SKILL_DIR/scripts/pr.sh open <wt> --title "so(<slug>): <goal>" --body-file <run dir>/pr-<slug>.md`
    → status `pr-open`, record `pr`. Exit 1: record the `reason`, stay `committed`, and list the
    manual commands in the final summary.
 4. Merge when the task's `merge` is `auto` **and**, in `low-risk` mode, `risk == "L"`,
@@ -172,12 +172,12 @@ Never silently drop a task or its dependents.
 - `independent`: the PRs were opened (and merged where allowed) at §4a; collect them into the
   summary: PR URL and `merged` / `open — <reason>` / `local only — <reason>` per task.
 - `staged`: after the last stage's integration gate and the baseline check, `pr.sh open
-  <stage worktree> --base <default_base_sha> ...` for `sar-stage/<last>` (one PR with
+  <stage worktree> --base <default_base_sha> ...` for `so-stage/<last>` (one PR with
   everything; stacked per-stage PRs only if the user asked for them at the checkpoint). Merge
   it with `pr.sh merge` by the mode: `manual` never; `low-risk` only when **every** task is Risk
   L, was approved in round 1 and was not escalated; `all` always.
 - Removing worktrees and archiving the run dir still need the user's consent. A squash or
-  rebase merge leaves `sar/<slug>` "unmerged" for `worktree.sh remove`, which keeps the
+  rebase merge leaves `so/<slug>` "unmerged" for `worktree.sh remove`, which keeps the
   branch; delete it with `git branch -D` after the user agrees, once its PR is `merged`.
 - Remove task worktrees with `worktree.sh remove <slug>` and stage worktrees with
   `worktree.sh remove --stage <n>`. A stage branch built only from merges is deleted locally

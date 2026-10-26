@@ -7,7 +7,7 @@ WT=$SCRIPTS/wt.sh
 section "config: offer_bare_migration"
 std=$(make_repo std)
 check_eq "standard repo: offered" "$(cd "$std" && bash "$W" config | json_get '["offer_bare_migration"]')" True
-mkdir -p "$std/.agents" && echo '{"offerBareLayout": false}' >"$std/.agents/spec-ops.json"
+mkdir -p "$std/.agents" && echo '{"offerBareLayout": false}' >"$std/.agents/spec-ops-pipeline.json"
 check_eq "offerBareLayout false: not offered" \
   "$(cd "$std" && bash "$W" config | json_get '["offer_bare_migration"]')" False
 
@@ -16,25 +16,25 @@ repo=$(make_repo bare)
 check_eq "bare layout: not offered" "$(cd "$repo" && bash "$W" config | json_get '["offer_bare_migration"]')" False
 
 section "config: repo config found from the container root"
-mkdir -p "$repo/main/.agents" && echo '{"maxParallel": 2}' >"$repo/main/.agents/spec-ops.json"
-check_eq "maxParallel read from main/.agents/spec-ops.json" \
+mkdir -p "$repo/main/.agents" && echo '{"maxParallel": 2}' >"$repo/main/.agents/spec-ops-pipeline.json"
+check_eq "maxParallel read from main/.agents/spec-ops-pipeline.json" \
   "$(cd "$repo" && bash "$W" config | json_get '["max_parallel"]')" 2
 rm -r "$repo/main/.agents"
 
 section "config: autoMerge / mergeMethod"
 cfg_get() { (cd "$std" && bash "$W" config | json_get "$1"); }
-cfgfile=$std/.agents/spec-ops.json
+cfgfile=$std/.agents/spec-ops-pipeline.json
 check_eq "autoMerge defaults to low-risk" "$(cfg_get '["auto_merge"]')" low-risk
 check_eq "mergeMethod defaults to squash" "$(cfg_get '["merge_method"]')" squash
 echo '{"autoMerge": "all", "mergeMethod": "rebase"}' >"$cfgfile"
 check_eq "autoMerge read from the config" "$(cfg_get '["auto_merge"]')" all
 check_eq "mergeMethod read from the config" "$(cfg_get '["merge_method"]')" rebase
-check_eq "SO_AUTO_MERGE wins over the config" \
-  "$(cd "$std" && SO_AUTO_MERGE=manual bash "$W" config | json_get '["auto_merge"]')" manual
-check_eq "SO_MERGE_METHOD wins over the config" \
-  "$(cd "$std" && SO_MERGE_METHOD=merge bash "$W" config | json_get '["merge_method"]')" merge
-(cd "$std" && SO_AUTO_MERGE=bogus bash "$W" config >/dev/null 2>&1); rc=$?
-check_eq "invalid SO_AUTO_MERGE: exit 2" "$rc" 2
+check_eq "SOP_AUTO_MERGE wins over the config" \
+  "$(cd "$std" && SOP_AUTO_MERGE=manual bash "$W" config | json_get '["auto_merge"]')" manual
+check_eq "SOP_MERGE_METHOD wins over the config" \
+  "$(cd "$std" && SOP_MERGE_METHOD=merge bash "$W" config | json_get '["merge_method"]')" merge
+(cd "$std" && SOP_AUTO_MERGE=bogus bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "invalid SOP_AUTO_MERGE: exit 2" "$rc" 2
 echo '{"mergeMethod": "ff"}' >"$cfgfile"
 (cd "$std" && bash "$W" config >/dev/null 2>&1); rc=$?
 check_eq "invalid mergeMethod in the config: exit 2" "$rc" 2
@@ -42,9 +42,9 @@ echo '{"offerBareLayout": false}' >"$cfgfile"
 
 section "status"
 (cd "$repo" && bash "$W" create clean-task >/dev/null 2>&1 && bash "$W" create dirty-task >/dev/null 2>&1)
-check "create provisioned .env" test -f "$repo/so/clean-task/.env"
-echo change >>"$repo/so/dirty-task/a.txt"
-echo new >"$repo/so/dirty-task/new.txt"
+check "create provisioned .env" test -f "$repo/sop/clean-task/.env"
+echo change >>"$repo/sop/dirty-task/a.txt"
+echo new >"$repo/sop/dirty-task/new.txt"
 out=$(cd "$repo" && bash "$W" status)
 line() { grep "\"slug\":\"$1\"" <<<"$out"; }
 check_eq "clean task is clean" "$(line clean-task | json_get '["state"]')" clean
@@ -56,15 +56,15 @@ check_eq "ahead_of_base 0" "$(line clean-task | json_get '["ahead_of_base"]')" 0
 check "main worktree not listed" bash -c "! grep -q '\"branch\":\"main\"' <<<'$out'"
 (cd "$repo" && bash "$W" status --check >/dev/null); rc=$?
 check_eq "--check with a dirty task: exit 1" "$rc" 1
-rm -rf "$repo/so/clean-task"
+rm -rf "$repo/sop/clean-task"
 check_eq "deleted worktree dir is missing" \
   "$(cd "$repo" && bash "$W" status | grep '"clean-task"' | json_get '["state"]')" missing
 git -C "$repo/main" worktree prune
 
 section "provision"
-rm -f "$repo/so/dirty-task/.env"
-out=$(cd "$repo" && bash "$W" provision so/dirty-task 2>/dev/null)
-check ".env provisioned into an existing worktree" test -f "$repo/so/dirty-task/.env"
+rm -f "$repo/sop/dirty-task/.env"
+out=$(cd "$repo" && bash "$W" provision sop/dirty-task 2>/dev/null)
+check ".env provisioned into an existing worktree" test -f "$repo/sop/dirty-task/.env"
 check "provision reports it" grep -q 'copy:.env' <<<"$out"
 (cd "$repo" && bash "$W" provision main >/dev/null 2>&1); rc=$?
 check_eq "source worktree refused" "$rc" 2
@@ -83,10 +83,10 @@ check "new worktree provisioned" test -f "$repo/feat/new/.env"
 check_eq "existing local branch checked out" "$(git -C "$repo/local-branch" branch --show-current)" local-branch
 (cd "$repo" && bash "$WT" add remote-branch >/dev/null 2>&1)
 check_eq "remote-only branch tracks origin" "$(git -C "$repo/remote-branch" rev-parse --abbrev-ref @{u})" origin/remote-branch
-(cd "$repo" && bash "$WT" add so/x >/dev/null 2>&1); rc=$?
-check_eq "so/ branch refused" "$rc" 2
+(cd "$repo" && bash "$WT" add sop/x >/dev/null 2>&1); rc=$?
+check_eq "sop/ branch refused" "$rc" 2
 (cd "$repo/feat/new" && bash "$WT" st --check >/dev/null); rc=$?
-check_eq "status --check with a dirty spec-ops task: exit 1" "$rc" 1
+check_eq "status --check with a dirty spec-ops-pipeline task: exit 1" "$rc" 1
 check "status -s lists feat/new" bash -c "cd '$repo' && bash '$WT' st -s | grep -q '^CLEAN   feat/new'"
 echo x >"$repo/feat/new/x.txt"
 (cd "$repo" && bash "$WT" remove feat/new >/dev/null 2>&1); rc=$?
@@ -118,9 +118,9 @@ check "link removed once main/ has no AGENTS.md" test ! -L "$repo/AGENTS.md"
 rm -r "$repo/.claude" "$repo/CLAUDE.md" "$repo/main/.claude" "$repo/main/CLAUDE.md"
 
 section "rundir"
-out=$(cd "$repo/so/dirty-task" && bash "$W" rundir)
+out=$(cd "$repo/sop/dirty-task" && bash "$W" rundir)
 rd=$(json_get '["run_dir"]' <<<"$out")
-check_eq "run dir in the git common dir" "$rd" "$(git -C "$repo/main" rev-parse --path-format=absolute --git-common-dir)/so-run"
+check_eq "run dir in the git common dir" "$rd" "$(git -C "$repo/main" rev-parse --path-format=absolute --git-common-dir)/sop-run"
 check_eq "same run dir from the source worktree" "$(cd "$repo/main" && bash "$W" rundir | json_get '["run_dir"]')" "$rd"
 check "logs dir created" test -d "$rd/logs"
 check_eq "no state yet" "$(json_get '["has_state"]' <<<"$out")" False
@@ -140,14 +140,14 @@ check_eq "task worktree at <parent>/worktrees/<repo>/<slug>" "$t" "$WORK/worktre
 echo change >>"$t/a.txt"
 printf 'a.txt\n' >"$WORK/whitelist"
 check "check_scope passes for a whitelisted change" bash "$SCRIPTS/check_scope.sh" "$t" "$WORK/whitelist"
-git -C "$t" commit -qam "so(task-one): change"
-(cd "$std" && bash "$W" integrate 1 --base HEAD so/task-one >/dev/null 2>&1); rc=$?
+git -C "$t" commit -qam "sop(task-one): change"
+(cd "$std" && bash "$W" integrate 1 --base HEAD sop/task-one >/dev/null 2>&1); rc=$?
 check_eq "integrate exits 0" "$rc" 0
 check_eq "status lists task and stage" "$(cd "$std" && bash "$W" status | python3 -c 'import json,sys; print(sorted({json.loads(l)["kind"] for l in sys.stdin}))')" \
   "['stage', 'task']"
 (cd "$std" && bash "$W" remove --stage 1 >/dev/null 2>&1 && bash "$W" remove task-one >/dev/null 2>&1); rc=$?
 check_eq "remove stage and task" "$rc" 0
-check_eq "no spec-ops worktrees left" "$(cd "$std" && bash "$W" list)" ""
+check_eq "no spec-ops-pipeline worktrees left" "$(cd "$std" && bash "$W" list)" ""
 
 section "remove: docker compose down"
 # Fake docker: logs "<cwd>|<args>", prints $DOCKER_ROWS for `ps`, exits $DOCKER_DOWN_RC for `compose`.
@@ -185,8 +185,8 @@ check "shared project: worktree still removed" test ! -e "$t"
 t=$(new_task compose-off)
 printf 'off\t%s\n' "$t" >"$DOCKER_ROWS"
 : >"$DOCKER_LOG"
-SO_COMPOSE_DOWN=0 dremove compose-off >/dev/null 2>&1
-check_eq "SO_COMPOSE_DOWN=0: docker not called" "$(wc -l <"$DOCKER_LOG")" 0
+SOP_COMPOSE_DOWN=0 dremove compose-off >/dev/null 2>&1
+check_eq "SOP_COMPOSE_DOWN=0: docker not called" "$(wc -l <"$DOCKER_LOG")" 0
 
 t=$(new_task compose-dirty)
 printf 'dirty\t%s\n' "$t" >"$DOCKER_ROWS"

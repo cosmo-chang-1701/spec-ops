@@ -150,7 +150,7 @@ done
 git -C "$worktree" rev-parse --git-dir >/dev/null 2>&1 || die "not a git worktree: $worktree"
 
 if [[ -z $base ]]; then
-  base_file="$(git -C "$worktree" rev-parse --absolute-git-dir)/sar-base"
+  base_file="$(git -C "$worktree" rev-parse --absolute-git-dir)/so-base"
   [[ -r $base_file ]] || die "no recorded base; pass --base <ref>"
   base=$(<"$base_file")
 fi

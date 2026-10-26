@@ -94,8 +94,8 @@ blocked non-default "not the default branch" git switch -qc feature
 blocked merge "merge is in progress" bash -c 'git switch -qc other HEAD~1 && echo x >a.txt && git commit -qam x &&
   git switch -q main && git merge -q other'
 blocked index-lock "index.lock" touch .git/index.lock
-blocked tmp-exists "already exists" mkdir .sar-migrate-tmp
-blocked sar-leftover "earlier SAR run" git worktree add -q -b sar/old ../sar-old
+blocked tmp-exists "already exists" mkdir .so-migrate-tmp
+blocked so-leftover "earlier spec-ops run" git worktree add -q -b so/old ../so-old
 
 section "agent config is reachable from the container root"
 repo=$(make_repo agent)

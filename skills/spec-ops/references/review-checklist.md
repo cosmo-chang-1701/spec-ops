@@ -35,7 +35,7 @@ it is small, otherwise file by file (append `-- <path>`), so a large change does
 context:
 
 ```bash
-base=$(cat "$(git -C <worktree> rev-parse --absolute-git-dir)/sar-base")
+base=$(cat "$(git -C <worktree> rev-parse --absolute-git-dir)/so-base")
 git -C <worktree> diff "$base" --stat
 git -C <worktree> diff "$base" [-- <path>]
 ```
@@ -58,7 +58,7 @@ Findings (blocking first):
 
 ## Reviewer subagent
 Write the inputs to `<run dir>/review-<slug>-r<n>-input.md`: the worktree's absolute path, the
-base SHA (`sar-base`), the path of `spec-<slug>.md`, the round number, the gate summary lines
+base SHA (`so-base`), the path of `spec-<slug>.md`, the round number, the gate summary lines
 (the `run_logged.sh` line of each command), and from round 2 the previous round's findings.
 Then dispatch with the `lead` block of `detect_runtime.sh` (model, effort, `dispatch_model`):
 

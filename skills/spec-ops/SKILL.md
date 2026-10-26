@@ -1,5 +1,5 @@
 ---
-name: spec-audit-and-refactor
+name: spec-ops
 description: >-
   Runs a Lead-Worker workflow for code audits and delegated refactoring. The Lead
   (reviewer/orchestrator) scans code read-only, writes a gap analysis, drafts a
@@ -13,15 +13,15 @@ description: >-
   implementation, or to review a worker's branch before merging.
 ---
 
-# Spec Audit & Refactor (Lead-Worker)
+# Spec Ops (Lead-Worker)
 
-`SKILL_DIR` below = the directory containing this file (e.g. `~/.agents/skills/spec-audit-and-refactor`).
+`SKILL_DIR` below = the directory containing this file (e.g. `~/.agents/skills/spec-ops`).
 
 ## Role boundaries (non-negotiable)
 
 | Role | May | Must not |
 | :--- | :--- | :--- |
-| **Lead** (you) | Read/search code, run tests/linters/builds, write specs, reviews, and run state (in the run dir), create/remove/integrate worktrees via `worktree.sh`; after the user's explicit yes, convert the repo to the bare-repo worktree layout with `migrate_to_bare.sh --apply`; once the user approved it at the checkpoint, commit approved work on `sar/*` branches (in staged mode also between stages), and run `pr.sh open` / `pr.sh merge` to push, open the PR and — per `auto_merge` — merge it | Edit, create, delete, or move any application file — in the main checkout **or** in a worker worktree (sole exception: `migrate_to_bare.sh --apply` as above); resolve merge conflicts by hand; merge a task that was not APPROVEd, use `--admin`, or otherwise get around branch protection |
+| **Lead** (you) | Read/search code, run tests/linters/builds, write specs, reviews, and run state (in the run dir), create/remove/integrate worktrees via `worktree.sh`; after the user's explicit yes, convert the repo to the bare-repo worktree layout with `migrate_to_bare.sh --apply`; once the user approved it at the checkpoint, commit approved work on `so/*` branches (in staged mode also between stages), and run `pr.sh open` / `pr.sh merge` to push, open the PR and — per `auto_merge` — merge it | Edit, create, delete, or move any application file — in the main checkout **or** in a worker worktree (sole exception: `migrate_to_bare.sh --apply` as above); resolve merge conflicts by hand; merge a task that was not APPROVEd, use `--admin`, or otherwise get around branch protection |
 | **Worker** (subagent) | Edit files matched by its whitelist, inside its worktree, until the DoD passes | Touch non-whitelisted files, commit/push, or work outside its worktree |
 
 If the Lead is tempted to "just fix it quickly", write it into a spec instead.
@@ -43,7 +43,7 @@ silently continue — except in a `single`-session run, which keeps the phase 1 
   current stage's specs — specs are self-contained by design, so nothing else from phase 1
   is needed. In a `single` run it continues in the same session on the phase 1 Lead model.
 
-Which one, from `session_split` (`detect_runtime.sh`, env `SAR_SESSION_SPLIT`):
+Which one, from `session_split` (`detect_runtime.sh`, env `SO_SESSION_SPLIT`):
 - `auto` (default) — `single` for a small run: exactly one task with risk L or M. `split`
   for two or more tasks (including `staged`) or any H-risk task, where a fresh session keeps
   the Lead's context small.
@@ -52,7 +52,7 @@ Which one, from `session_split` (`detect_runtime.sh`, env `SAR_SESSION_SPLIT`):
 Show the result in the checkpoint report; an explicit request from the user there wins.
 
 Run state lives in the **run dir**, `bash SKILL_DIR/scripts/worktree.sh rundir` →
-`<git common dir>/sar-run/`: outside every work tree (baselines and scope gates never see it),
+`<git common dir>/so-run/`: outside every work tree (baselines and scope gates never see it),
 shared by all worktrees, and kept across sessions. Never use a session scratchpad for it.
 
 **Command output** — run every lint/test/build/DoD command through
@@ -176,9 +176,9 @@ is approved or deferred, and the stage when it is integrated.
 ### 3. Worktree + dispatch
 1. For each task in the stage: `bash SKILL_DIR/scripts/worktree.sh path <slug>` to preview,
    then `bash SKILL_DIR/scripts/worktree.sh create <slug> [--base <ref>]` (stage 1: omit
-   `--base` to use `default_base`; stage 2+: `--base sar-stage/<n-1>`). The path adapts to
+   `--base` to use `default_base`; stage 2+: `--base so-stage/<n-1>`). The path adapts to
    the repo (config → existing worktree layout → bare → standard); see the script header.
-   Branch is `sar/<slug>`; the fork point is recorded for later diffs. Files listed under
+   Branch is `so/<slug>`; the fork point is recorded for later diffs. Files listed under
    `provision` (gitignored secrets, venvs) are copied/linked in; check `provisioned` in the
    output and stop if an expected entry is missing. Stage 2+: dry-run each task's DoD in its
    new worktree through `run_logged.sh` before dispatch (path/flag fixes only; anything
@@ -205,7 +205,7 @@ the `worker` model ([models.md](references/models.md#worker-tier)).
   task's Merge value and `auto_merge` allow — all under the checkpoint approval, with no
   question ([execution-plan.md §4a](references/execution-plan.md#4a-after-approve-independent-mode)).
 - `staged`: when every task in the stage is APPROVED, commit each locally, run
-  `worktree.sh integrate <n> --base <stage base> sar/<slug>...`, and pass the integration
+  `worktree.sh integrate <n> --base <stage base> so/<slug>...`, and pass the integration
   gate (all of the stage's DoD in the stage worktree) before starting the next stage. See
   execution-plan.md for conflicts, integration failures, and escalated tasks. With more
   stages to go, set `current_stage` to the next one in `state.json` and offer the user a
@@ -216,7 +216,7 @@ the `worker` model ([models.md](references/models.md#worker-tier)).
    what changed in the main checkout — do not "fix" it yourself.
 2. PRs: `independent` PRs already exist (§5); list each task's PR and whether it is `merged`,
    `open` (with the reason) or local only. For `staged`, open the single PR from the last
-   `sar-stage/<n>` with `pr.sh` (merge per `auto_merge`, see
+   `so-stage/<n>` with `pr.sh` (merge per `auto_merge`, see
    [execution-plan.md §6](references/execution-plan.md#6-close-out)).
 3. With user consent, `bash SKILL_DIR/scripts/worktree.sh remove <slug>` for every task and
    `remove --stage <n>` for every stage (refuses dirty worktrees without `--force`; task
@@ -225,7 +225,7 @@ the `worker` model ([models.md](references/models.md#worker-tier)).
    (volumes kept) for Compose projects started only from inside that worktree; a project
    shared with another checkout is left running and reported.
 4. With user consent, `bash SKILL_DIR/scripts/worktree.sh rundir --archive` (keeps the
-   plan, specs, and logs as `sar-run.<timestamp>/` in the git common dir; delete it if the
+   plan, specs, and logs as `so-run.<timestamp>/` in the git common dir; delete it if the
    user prefers).
 5. Final summary: findings addressed, findings deferred (and their blocked dependents),
    branches/PRs created with their state.

@@ -20,9 +20,9 @@ Unknown ecosystems fall back to the Claude column. Each block also has `dispatch
 value to pass to the runtime's dispatch call (`opus`, `sonnet`, `haiku` in Claude Code). A
 `single`-session run needs no Reviewer subagent: the Lead already runs on `lead`.
 
-Overrides: `SAR_LEAD_MODEL`, `SAR_LEAD_EFFORT`, `SAR_LEAD2_MODEL`, `SAR_LEAD2_EFFORT`,
-`SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`, `SAR_WORKER_LIGHT_MODEL`, `SAR_WORKER_LIGHT_EFFORT`,
-`SAR_SCOUT_MODEL`, `SAR_SCOUT_EFFORT`. Setting a model also sets its `dispatch_model`.
+Overrides: `SO_LEAD_MODEL`, `SO_LEAD_EFFORT`, `SO_LEAD2_MODEL`, `SO_LEAD2_EFFORT`,
+`SO_WORKER_MODEL`, `SO_WORKER_EFFORT`, `SO_WORKER_LIGHT_MODEL`, `SO_WORKER_LIGHT_EFFORT`,
+`SO_SCOUT_MODEL`, `SO_SCOUT_EFFORT`. Setting a model also sets its `dispatch_model`.
 
 ## Lead model per phase
 If you are not running as the Lead model of the current phase, tell the user how to switch

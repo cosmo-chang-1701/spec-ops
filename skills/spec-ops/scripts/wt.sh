@@ -14,17 +14,17 @@
 # add: an existing local branch is checked out as is; a branch that only exists on origin
 # gets a tracking branch; otherwise a new branch (no upstream) starts from <base>, default
 # origin/<default branch> (else <default branch>). Gitignored .env / .env.* files are copied
-# and .venv dirs linked from the default-branch worktree, as for SAR worktrees.
+# and .venv dirs linked from the default-branch worktree, as for spec-ops worktrees.
 # link-config: agent CLIs started at <root> load CLAUDE.md, AGENTS.md, GEMINI.md, .claude/,
 # .agents/, .codex/ and .gemini/ through relative symlinks into the default-branch worktree
 # (migrate_to_bare.sh creates them). This adds missing ones, re-points dangling ones, removes
 # those whose target is gone, and leaves real files and symlinks pointing elsewhere alone.
-# Branches under sar/ and sar-stage/ belong to spec-audit-and-refactor: use worktree.sh.
+# Branches under so/ and so-stage/ belong to spec-ops: use worktree.sh.
 set -euo pipefail
 export GIT_OPTIONAL_LOCKS=0
 
-readonly BRANCH_PREFIX=${SAR_BRANCH_PREFIX:-sar/}
-readonly STAGE_PREFIX=${SAR_STAGE_PREFIX:-sar-stage/}
+readonly BRANCH_PREFIX=${SO_BRANCH_PREFIX:-so/}
+readonly STAGE_PREFIX=${SO_STAGE_PREFIX:-so-stage/}
 # Keep in sync with migrate_to_bare.sh.
 readonly AGENT_CONFIG=(CLAUDE.md AGENTS.md GEMINI.md .claude .agents .codex .gemini)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -57,7 +57,7 @@ worktree_entries() {
 reserved_branch() {
   case $1 in
     "$BRANCH_PREFIX"*|"$STAGE_PREFIX"*)
-      die "branch '$1' belongs to spec-audit-and-refactor; use worktree.sh for it" ;;
+      die "branch '$1' belongs to spec-ops; use worktree.sh for it" ;;
   esac
 }
 

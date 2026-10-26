@@ -42,22 +42,22 @@ check_eq "light worker effort" "$(json_get '["worker_light"]["effort"]' <<<"$out
 check_eq "scout effort" "$(json_get '["scout"]["effort"]' <<<"$out")" low
 
 section "overrides"
-AGENT=claude; out=$(run SAR_LEAD2_MODEL=claude-opus-5-5 SAR_LEAD2_EFFORT=medium SAR_LEAD_EFFORT=max SAR_WORKER_MODEL=haiku)
-check_eq "SAR_LEAD2_MODEL" "$(json_get '["lead_phase2"]["model"]' <<<"$out")" claude-opus-5-5
-check_eq "SAR_LEAD2_EFFORT" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" medium
-check_eq "SAR_LEAD2_MODEL sets the dispatch alias" "$(json_get '["lead_phase2"]["dispatch_model"]' <<<"$out")" claude-opus-5-5
-check_eq "SAR_LEAD_MODEL sets the dispatch alias" "$(json_get '["lead"]["dispatch_model"]' <<<"$(run SAR_LEAD_MODEL=sonnet)")" sonnet
-check_eq "SAR_LEAD_EFFORT leaves phase 2 alone" "$(json_get '["lead_phase2"]["effort"]' <<<"$(run SAR_LEAD_EFFORT=max)")" high
-check_eq "SAR_WORKER_MODEL sets the dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" haiku
-out=$(run SAR_WORKER_LIGHT_MODEL=sonnet SAR_WORKER_LIGHT_EFFORT=low SAR_SCOUT_MODEL=sonnet SAR_SCOUT_EFFORT=medium)
-check_eq "SAR_WORKER_LIGHT_MODEL sets the dispatch alias" "$(json_get '["worker_light"]["dispatch_model"]' <<<"$out")" sonnet
-check_eq "SAR_WORKER_LIGHT_EFFORT" "$(json_get '["worker_light"]["effort"]' <<<"$out")" low
-check_eq "SAR_SCOUT_MODEL sets the dispatch alias" "$(json_get '["scout"]["dispatch_model"]' <<<"$out")" sonnet
-check_eq "SAR_SCOUT_EFFORT" "$(json_get '["scout"]["effort"]' <<<"$out")" medium
+AGENT=claude; out=$(run SO_LEAD2_MODEL=claude-opus-5-5 SO_LEAD2_EFFORT=medium SO_LEAD_EFFORT=max SO_WORKER_MODEL=haiku)
+check_eq "SO_LEAD2_MODEL" "$(json_get '["lead_phase2"]["model"]' <<<"$out")" claude-opus-5-5
+check_eq "SO_LEAD2_EFFORT" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" medium
+check_eq "SO_LEAD2_MODEL sets the dispatch alias" "$(json_get '["lead_phase2"]["dispatch_model"]' <<<"$out")" claude-opus-5-5
+check_eq "SO_LEAD_MODEL sets the dispatch alias" "$(json_get '["lead"]["dispatch_model"]' <<<"$(run SO_LEAD_MODEL=sonnet)")" sonnet
+check_eq "SO_LEAD_EFFORT leaves phase 2 alone" "$(json_get '["lead_phase2"]["effort"]' <<<"$(run SO_LEAD_EFFORT=max)")" high
+check_eq "SO_WORKER_MODEL sets the dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" haiku
+out=$(run SO_WORKER_LIGHT_MODEL=sonnet SO_WORKER_LIGHT_EFFORT=low SO_SCOUT_MODEL=sonnet SO_SCOUT_EFFORT=medium)
+check_eq "SO_WORKER_LIGHT_MODEL sets the dispatch alias" "$(json_get '["worker_light"]["dispatch_model"]' <<<"$out")" sonnet
+check_eq "SO_WORKER_LIGHT_EFFORT" "$(json_get '["worker_light"]["effort"]' <<<"$out")" low
+check_eq "SO_SCOUT_MODEL sets the dispatch alias" "$(json_get '["scout"]["dispatch_model"]' <<<"$out")" sonnet
+check_eq "SO_SCOUT_EFFORT" "$(json_get '["scout"]["effort"]' <<<"$out")" medium
 check_eq "session split defaults to auto" "$(json_get '["session_split"]' <<<"$out")" auto
-check_eq "SAR_SESSION_SPLIT" "$(json_get '["session_split"]' <<<"$(run SAR_SESSION_SPLIT=never)")" never
-run SAR_SESSION_SPLIT=bogus >/dev/null 2>&1; rc=$?
-check_eq "invalid SAR_SESSION_SPLIT: exit 2" "$rc" 2
+check_eq "SO_SESSION_SPLIT" "$(json_get '["session_split"]' <<<"$(run SO_SESSION_SPLIT=never)")" never
+run SO_SESSION_SPLIT=bogus >/dev/null 2>&1; rc=$?
+check_eq "invalid SO_SESSION_SPLIT: exit 2" "$rc" 2
 
 section "detection"
 check_eq "--agent wins over runtime markers" \

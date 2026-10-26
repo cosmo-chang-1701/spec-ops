@@ -5,7 +5,7 @@
 #
 # Detection priority (first hit wins):
 #   1. --agent flag            (the running agent knows who it is; most reliable)
-#   2. SAR_ECOSYSTEM env var   (user override)
+#   2. SO_ECOSYSTEM env var   (user override)
 #   3. Runtime markers         (env vars injected by the agent CLI itself)
 #   4. API keys                (only when exactly ONE provider key is present;
 #                               several keys at once are common and ambiguous)
@@ -16,10 +16,10 @@
 # "worker_light" implements small mechanical L-risk tasks; "scout" sweeps code read-only
 # during the audit (see references/models.md). The read-only Reviewer of a Worker's diff runs
 # on "lead" (use its dispatch_model).
-# Per-field overrides: SAR_LEAD_MODEL, SAR_LEAD_EFFORT, SAR_LEAD2_MODEL, SAR_LEAD2_EFFORT,
-# SAR_WORKER_MODEL, SAR_WORKER_EFFORT, SAR_WORKER_LIGHT_MODEL, SAR_WORKER_LIGHT_EFFORT,
-# SAR_SCOUT_MODEL, SAR_SCOUT_EFFORT.
-# Session split: SAR_SESSION_SPLIT = auto (default: split only multi-task or H-risk runs),
+# Per-field overrides: SO_LEAD_MODEL, SO_LEAD_EFFORT, SO_LEAD2_MODEL, SO_LEAD2_EFFORT,
+# SO_WORKER_MODEL, SO_WORKER_EFFORT, SO_WORKER_LIGHT_MODEL, SO_WORKER_LIGHT_EFFORT,
+# SO_SCOUT_MODEL, SO_SCOUT_EFFORT.
+# Session split: SO_SESSION_SPLIT = auto (default: split only multi-task or H-risk runs),
 # always, or never; reported as "session_split".
 # Output: a single JSON object on stdout.
 set -euo pipefail
@@ -61,19 +61,19 @@ while (($#)); do
   esac
 done
 
-session_split=${SAR_SESSION_SPLIT:-auto}
+session_split=${SO_SESSION_SPLIT:-auto}
 case $session_split in
   auto|always|never) ;;
-  *) die "SAR_SESSION_SPLIT must be one of: auto always never" ;;
+  *) die "SO_SESSION_SPLIT must be one of: auto always never" ;;
 esac
 
 ecosystem="" detected_by=""
 if [[ -n $agent_flag ]]; then
   is_valid_ecosystem "$agent_flag" || die "--agent must be one of: $VALID_ECOSYSTEMS"
   ecosystem=$agent_flag detected_by="flag:--agent"
-elif [[ -n ${SAR_ECOSYSTEM:-} ]]; then
-  is_valid_ecosystem "$SAR_ECOSYSTEM" || die "SAR_ECOSYSTEM must be one of: $VALID_ECOSYSTEMS"
-  ecosystem=$SAR_ECOSYSTEM detected_by="env:SAR_ECOSYSTEM"
+elif [[ -n ${SO_ECOSYSTEM:-} ]]; then
+  is_valid_ecosystem "$SO_ECOSYSTEM" || die "SO_ECOSYSTEM must be one of: $VALID_ECOSYSTEMS"
+  ecosystem=$SO_ECOSYSTEM detected_by="env:SO_ECOSYSTEM"
 elif [[ -n ${CLAUDECODE:-} ]] || has_env_prefix 'CLAUDE_CODE_'; then
   ecosystem=claude detected_by="runtime:claude-code"
 elif has_env_prefix 'CODEX_(SANDBOX|THREAD_ID|SESSION|MANAGED)'; then
@@ -118,21 +118,21 @@ case $ecosystem in
     scout_model=$lead_model              scout_effort=low scout_alias=$lead_model ;;
 esac
 
-lead_model=${SAR_LEAD_MODEL:-$lead_model}
-lead_effort=${SAR_LEAD_EFFORT:-$lead_effort}
-[[ -n ${SAR_LEAD_MODEL:-} ]] && lead_alias=$SAR_LEAD_MODEL
-lead2_model=${SAR_LEAD2_MODEL:-$lead2_model}
-lead2_effort=${SAR_LEAD2_EFFORT:-$lead2_effort}
-[[ -n ${SAR_LEAD2_MODEL:-} ]] && lead2_alias=$SAR_LEAD2_MODEL
-worker_model=${SAR_WORKER_MODEL:-$worker_model}
-worker_effort=${SAR_WORKER_EFFORT:-$worker_effort}
-[[ -n ${SAR_WORKER_MODEL:-} ]] && worker_alias=$SAR_WORKER_MODEL
-light_model=${SAR_WORKER_LIGHT_MODEL:-$light_model}
-light_effort=${SAR_WORKER_LIGHT_EFFORT:-$light_effort}
-[[ -n ${SAR_WORKER_LIGHT_MODEL:-} ]] && light_alias=$SAR_WORKER_LIGHT_MODEL
-scout_model=${SAR_SCOUT_MODEL:-$scout_model}
-scout_effort=${SAR_SCOUT_EFFORT:-$scout_effort}
-[[ -n ${SAR_SCOUT_MODEL:-} ]] && scout_alias=$SAR_SCOUT_MODEL
+lead_model=${SO_LEAD_MODEL:-$lead_model}
+lead_effort=${SO_LEAD_EFFORT:-$lead_effort}
+[[ -n ${SO_LEAD_MODEL:-} ]] && lead_alias=$SO_LEAD_MODEL
+lead2_model=${SO_LEAD2_MODEL:-$lead2_model}
+lead2_effort=${SO_LEAD2_EFFORT:-$lead2_effort}
+[[ -n ${SO_LEAD2_MODEL:-} ]] && lead2_alias=$SO_LEAD2_MODEL
+worker_model=${SO_WORKER_MODEL:-$worker_model}
+worker_effort=${SO_WORKER_EFFORT:-$worker_effort}
+[[ -n ${SO_WORKER_MODEL:-} ]] && worker_alias=$SO_WORKER_MODEL
+light_model=${SO_WORKER_LIGHT_MODEL:-$light_model}
+light_effort=${SO_WORKER_LIGHT_EFFORT:-$light_effort}
+[[ -n ${SO_WORKER_LIGHT_MODEL:-} ]] && light_alias=$SO_WORKER_LIGHT_MODEL
+scout_model=${SO_SCOUT_MODEL:-$scout_model}
+scout_effort=${SO_SCOUT_EFFORT:-$scout_effort}
+[[ -n ${SO_SCOUT_MODEL:-} ]] && scout_alias=$SO_SCOUT_MODEL
 
 printf '{"ecosystem":"%s","detected_by":"%s","lead":{"model":"%s","effort":"%s","dispatch_model":"%s"},"lead_phase2":{"model":"%s","effort":"%s","dispatch_model":"%s"},"worker":{"model":"%s","effort":"%s","dispatch_model":"%s"},"worker_light":{"model":"%s","effort":"%s","dispatch_model":"%s"},"scout":{"model":"%s","effort":"%s","dispatch_model":"%s"},"session_split":"%s"}\n' \
   "$ecosystem" "$(json_escape "$detected_by")" \

@@ -13,7 +13,7 @@ the worktree below and ONLY files matched by the Whitelist. The Lead will reject
 change outside it. Do not commit, push, merge, rebase, or touch other worktrees/branches.
 
 - Worktree (your working root): <absolute path>
-- Branch: sar/<task-slug> (already checked out; base <short sha>)
+- Branch: so/<task-slug> (already checked out; base <short sha>)
 - Stage: <n>/<total> · Base includes: <slugs of earlier tasks already merged in, or "none">
 
 Other Workers may be editing other files in other worktrees at the same time. Never read,
@@ -91,7 +91,7 @@ Before the checkpoint, the Lead runs every DoD command once on the code the Work
 from, so a broken or unreachable DoD never reaches a Worker:
 - `independent` mode and stage 1: in `source_worktree` (where step 1 ran the tests);
 - stage 2+: in the task's worktree right after `worktree.sh create`, before dispatch — its
-  base `sar-stage/<n-1>` does not exist at the checkpoint.
+  base `so-stage/<n-1>` does not exist at the checkpoint.
 
 Run each command through `run_logged.sh` (log `<run dir>/logs/<slug>-dry-<n>.log`), so only
 its exit code and, on failure, its tail reach the Lead. Classify each command and write the

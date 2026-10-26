@@ -3,9 +3,9 @@
 # shellcheck shell=bash
 set -uo pipefail
 
-SKILL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../skills/spec-ops" && pwd)
+SKILL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../skills/spec-ops-pipeline" && pwd)
 SCRIPTS=$SKILL_DIR/scripts
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/so-test.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/sop-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=$WORK/gitconfig

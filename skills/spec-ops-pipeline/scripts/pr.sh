@@ -19,7 +19,7 @@
 # stdout is one JSON line; gh/git chatter goes to stderr. Exit: 0 = done, 1 = not done (the
 # JSON says why: "ok":false / "state":"checks-failed"|"checks-timeout"|"merge-refused"),
 # 2 = usage error.
-# Env: SO_PR_TIMEOUT (seconds to wait for checks, default 1800), SO_PR_CHECKS_DELAY
+# Env: SOP_PR_TIMEOUT (seconds to wait for checks, default 1800), SOP_PR_CHECKS_DELAY
 # (seconds before re-asking a PR that reports no checks yet, default 20).
 set -euo pipefail
 
@@ -88,8 +88,8 @@ cmd_open() {
 
   git_dir=$(git -C "$worktree" rev-parse --absolute-git-dir) || die "open: not a git worktree: $worktree"
   if [[ -z $base ]]; then
-    [[ -r $git_dir/so-base ]] || die "open: no recorded base in $git_dir (pass --base)"
-    base=$(<"$git_dir/so-base")
+    [[ -r $git_dir/sop-base ]] || die "open: no recorded base in $git_dir (pass --base)"
+    base=$(<"$git_dir/sop-base")
   fi
   branch=$(git -C "$worktree" symbolic-ref --quiet --short HEAD) || die "open: $worktree is on a detached HEAD"
   [[ -n $into ]] || into=$(default_into "$worktree")
@@ -129,7 +129,7 @@ wait_for_checks() {
     cat "$out" >&2
     if ((rc != 0)) && grep -qi 'no checks reported' "$out"; then
       # Checks register a moment after the push; ask again once, then treat it as "no CI".
-      if ((attempt == 1)); then sleep "${SO_PR_CHECKS_DELAY:-20}"; continue; fi
+      if ((attempt == 1)); then sleep "${SOP_PR_CHECKS_DELAY:-20}"; continue; fi
       rc=0
     fi
     break
@@ -139,7 +139,7 @@ wait_for_checks() {
 }
 
 cmd_merge() {
-  local pr=${1:-} method="" timeout_s=${SO_PR_TIMEOUT:-1800} rc=0 head merge_out
+  local pr=${1:-} method="" timeout_s=${SOP_PR_TIMEOUT:-1800} rc=0 head merge_out
   [[ -n $pr && $pr != --* ]] || die "merge: usage: pr.sh merge <pr-url|number> --method squash|merge|rebase"
   shift
   while (($#)); do

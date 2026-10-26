@@ -6,7 +6,7 @@
 # Runs the command with `bash -c` in the current directory; stdout and stderr go to
 # <log-file> (parent dirs are created, an existing file is replaced). Prints one line,
 #   exit=<rc> lines=<n> log=<path>
-# and on failure also the last ${SO_LOG_TAIL:-40} lines of the log. Exits with the
+# and on failure also the last ${SOP_LOG_TAIL:-40} lines of the log. Exits with the
 # command's own exit code, so it can stand in for the command in a gate.
 # Exit codes: the command's, or 2 for a usage error.
 set -uo pipefail
@@ -18,8 +18,8 @@ case ${1:-} in
 esac
 [[ $# -eq 2 && -n $1 && -n $2 ]] || die "usage: run_logged.sh <log-file> '<command string>'"
 log=$1 command=$2
-tail_lines=${SO_LOG_TAIL:-40}
-[[ $tail_lines =~ ^[0-9]+$ ]] || die "SO_LOG_TAIL must be a number"
+tail_lines=${SOP_LOG_TAIL:-40}
+[[ $tail_lines =~ ^[0-9]+$ ]] || die "SOP_LOG_TAIL must be a number"
 
 mkdir -p "$(dirname "$log")" || die "cannot create the log directory for $log"
 log=$(realpath -m "$log")

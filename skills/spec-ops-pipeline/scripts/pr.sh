@@ -14,11 +14,14 @@
 #       Wait for the PR's checks, merge it, then delete the remote head branch. Never uses
 #       --admin and never bypasses branch protection. A PR without any checks is merged
 #       after one retry.
+#   pr.sh state <pr-url|number>
+#       Report the PR's state (OPEN, MERGED or CLOSED) and head branch, e.g. to clean up a task
+#       once the user merged its PR.
 #
 # <branch> defaults to origin's default branch (refs/remotes/origin/HEAD, else asked from origin).
 # stdout is one JSON line; gh/git chatter goes to stderr. Exit: 0 = done, 1 = not done (the
-# JSON says why: "ok":false / "state":"checks-failed"|"checks-timeout"|"merge-refused"),
-# 2 = usage error.
+# JSON says why: "ok":false / "state":"checks-failed"|"checks-timeout"|"merge-refused"|
+# "unknown"), 2 = usage error.
 # Env: SOP_PR_TIMEOUT (seconds to wait for checks, default 1800), SOP_PR_CHECKS_DELAY
 # (seconds before re-asking a PR that reports no checks yet, default 20).
 set -euo pipefail
@@ -165,10 +168,21 @@ cmd_merge() {
   printf '{"state":"merged","pr":"%s","method":"%s"}\n' "$(json_escape "$pr")" "$method"
 }
 
+cmd_state() {
+  local pr=${1:-} out state head
+  [[ -n $pr && $pr != --* && $# -eq 1 ]] || die "state: usage: pr.sh state <pr-url|number>"
+  out=$(gh pr view "$pr" --json state,headRefName --jq '.state + " " + .headRefName' 2>/dev/null) ||
+    not_done state '"unknown"' "gh cannot read the PR" ",\"pr\":\"$(json_escape "$pr")\""
+  read -r state head <<<"$out"
+  printf '{"state":"%s","pr":"%s","head":"%s"}\n' \
+    "$(json_escape "$state")" "$(json_escape "$pr")" "$(json_escape "$head")"
+}
+
 case ${1:-} in
   preflight) shift; cmd_preflight "$@" ;;
   open) shift; cmd_open "$@" ;;
   merge) shift; cmd_merge "$@" ;;
-  -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) die "usage: pr.sh preflight|open|merge ... (see --help)" ;;
+  state) shift; cmd_state "$@" ;;
+  -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "usage: pr.sh preflight|open|merge|state ... (see --help)" ;;
 esac

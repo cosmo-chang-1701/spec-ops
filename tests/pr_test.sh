@@ -13,6 +13,9 @@ case "$1 $2" in
   "auth status") [[ ${GH_AUTH:-ok} == fail ]] && exit 1; exit 0 ;;
   "pr view")
     case "$*" in
+      *state,headRefName*)
+        [[ ${GH_VIEW:-ok} == fail ]] && exit 1
+        printf '%s %s\n' "${GH_STATE:-OPEN}" "${GH_HEAD:-}"; exit 0 ;;
       *headRefName*) printf '%s\n' "${GH_HEAD:-}"; exit 0 ;;
       *) [[ -n ${GH_EXISTING_PR:-} ]] && { printf '%s\n' "$GH_EXISTING_PR"; exit 0; }; exit 1 ;;
     esac ;;
@@ -147,5 +150,18 @@ pr "$std" -- merge >/dev/null 2>&1; rc=$?
 check_eq "merge without a PR: exit 2" "$rc" 2
 pr "$std" -- bogus >/dev/null 2>&1; rc=$?
 check_eq "unknown command: exit 2" "$rc" 2
+
+section "state"
+out=$(pr "$std" GH_STATE=MERGED GH_HEAD=sop/task -- state 7); rc=$?
+check_eq "merged PR: exit 0" "$rc" 0
+check_eq "merged PR: state" "$(json_get '["state"]' <<<"$out")" MERGED
+check_eq "merged PR: head" "$(json_get '["head"]' <<<"$out")" sop/task
+out=$(pr "$std" GH_HEAD=sop/task -- state 7)
+check_eq "open PR: state" "$(json_get '["state"]' <<<"$out")" OPEN
+out=$(pr "$std" GH_VIEW=fail -- state 7); rc=$?
+check_eq "gh cannot read the PR: exit 1" "$rc" 1
+check_eq "gh cannot read the PR: state unknown" "$(json_get '["state"]' <<<"$out")" unknown
+pr "$std" -- state >/dev/null 2>&1; rc=$?
+check_eq "state without a PR: exit 2" "$rc" 2
 
 finish

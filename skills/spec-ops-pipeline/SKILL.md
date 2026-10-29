@@ -21,7 +21,7 @@ description: >-
 
 | Role | May | Must not |
 | :--- | :--- | :--- |
-| **Lead** (you) | Read/search code, run tests/linters/builds, write specs, reviews, and run state (in the run dir), create/remove/integrate worktrees via `worktree.sh`; after the user's explicit yes, convert the repo to the bare-repo worktree layout with `migrate_to_bare.sh --apply`; once the user approved it at the checkpoint, commit approved work on `sop/*` branches (in staged mode also between stages), and run `pr.sh open` / `pr.sh merge` to push, open the PR and — per `auto_merge_risk` — merge it | Edit, create, delete, or move any application file — in the main checkout **or** in a worker worktree (sole exception: `migrate_to_bare.sh --apply` as above); resolve merge conflicts by hand; merge a task that was not APPROVEd, use `--admin`, or otherwise get around branch protection |
+| **Lead** (you) | Read/search code, run tests/linters/builds, write specs, reviews, and run state (in the run dir), create/remove/integrate worktrees via `worktree.sh`; after the user's explicit yes, convert the repo to the bare-repo worktree layout with `migrate_to_bare.sh --apply`; once the user approved it at the checkpoint, commit approved work on `sop/*` branches (in staged mode also between stages), and run `pr.sh open` / `pr.sh merge` to push, open the PR and — per `auto_merge_risk` — merge it; per `auto_cleanup` (or with the user's consent) [clean up](references/execution-plan.md#6a-cleanup) after merged PRs: remove their worktrees and branches, fast-forward `source_worktree` with `worktree.sh sync`, archive the run dir | Edit, create, delete, or move any application file — in the main checkout **or** in a worker worktree (sole exceptions: `migrate_to_bare.sh --apply` as above, and the fast-forward of `worktree.sh sync`); resolve merge conflicts by hand; merge a task that was not APPROVEd, use `--admin`, or otherwise get around branch protection |
 | **Worker** (subagent) | Edit files matched by its whitelist, inside its worktree, until the DoD passes | Touch non-whitelisted files, commit/push, or work outside its worktree |
 
 If the Lead is tempted to "just fix it quickly", write it into a spec instead.
@@ -73,7 +73,8 @@ not explain a failure. Never let a full test suite's output into the conversatio
    root is not a work tree).
 3. Check `bash SKILL_DIR/scripts/worktree.sh status` for leftover tasks from earlier runs,
    and `bash SKILL_DIR/scripts/worktree.sh rundir` for a run in progress (`has_state: true`):
-   ask the user whether to [resume](#resume-phase-2) it or archive it
+   ask the user whether to [resume](#resume-phase-2) it — or, if its tasks all have PRs
+   waiting for the user, [clean it up](#cleanup-after-the-user-merges) — or archive it
    (`worktree.sh rundir --archive`) and start over. Note `run_dir`.
 4. If `offer_bare_migration` is `true`: run `bash SKILL_DIR/scripts/migrate_to_bare.sh`
    (dry run) and ask the user whether to convert to the **bare-repo worktree layout**, in the
@@ -85,7 +86,8 @@ not explain a failure. Never let a full test suite's output into the conversatio
    `state.json` at the checkpoint).
 6. `bash SKILL_DIR/scripts/pr.sh preflight` — can PRs be opened (gh installed and logged in,
    `origin` set)? Note `ok` and `into`; `ok: false` means the run only commits locally, and
-   the checkpoint says so. Note `auto_merge_risk` and `merge_method` from `worktree.sh config`
+   the checkpoint says so. Note `auto_merge_risk`, `merge_method` and `auto_cleanup` from
+   `worktree.sh config`
    ([execution-plan.md](references/execution-plan.md#auto-merge-modes)).
 7. If `default_base` is not `HEAD`: `git fetch` its remote, then check
    `git rev-parse HEAD` equals `git rev-parse <default_base>`. If not, the audited code
@@ -134,7 +136,8 @@ not explain a failure. Never let a full test suite's output into the conversatio
   [execution-plan.md §3](references/execution-plan.md#3-checkpoint-report). In `staged` mode
   the approval must explicitly cover the inter-stage local commits and merges. For every run
   it must also cover the automatic commit, push, PR and — per the Merge column — merge after
-  APPROVE (wording in [execution-plan.md §3](references/execution-plan.md#3-checkpoint-report)).
+  APPROVE, and with `auto_cleanup` the cleanup after each merge (wording in
+  [execution-plan.md §3](references/execution-plan.md#3-checkpoint-report)).
 - **Phase boundary** — after approval, write `<run dir>/state.json`
   ([execution-plan.md §7](references/execution-plan.md#7-run-state)) with `phase: 2` and the
   agreed `session`, then:
@@ -221,17 +224,24 @@ the `worker` model ([models.md](references/models.md#worker-tier)).
    `open` (with the reason) or local only. For `staged`, open the single PR from the last
    `sop-stage/<n>` with `pr.sh` (merge per `auto_merge_risk`, see
    [execution-plan.md §6](references/execution-plan.md#6-close-out)).
-3. With user consent, `bash SKILL_DIR/scripts/worktree.sh remove <slug>` for every task and
-   `remove --stage <n>` for every stage (refuses dirty worktrees without `--force`; task
-   branches are deleted only if merged — a squash or rebase merge does not count, so keep
-   them or `git branch -D` those whose PR is `merged`, with consent). Each `remove` first runs `docker compose down`
-   (volumes kept) for Compose projects started only from inside that worktree; a project
-   shared with another checkout is left running and reported.
-4. With user consent, `bash SKILL_DIR/scripts/worktree.sh rundir --archive` (keeps the
-   plan, specs, and logs as `sop-run.<timestamp>/` in the git common dir; delete it if the
-   user prefers).
-5. Final summary: findings addressed, findings deferred (and their blocked dependents),
-   branches/PRs created with their state.
+3. [Cleanup](references/execution-plan.md#6a-cleanup) of every merged PR's worktrees and
+   branches, then `worktree.sh sync` on `source_worktree` and, once every task is cleaned,
+   `worktree.sh rundir --archive`. With `auto_cleanup` in the approval this runs with no
+   question; otherwise ask the user first. Never with `--force`.
+4. Final summary: findings addressed, findings deferred (and their blocked dependents),
+   branches/PRs created with their state, what was cleaned up and what is left. If PRs are
+   still open for the user to merge, end with: after merging them, invoke this skill with
+   `cleanup`.
+
+### Cleanup (after the user merges)
+Entered when the skill is invoked with `cleanup`, or when preflight finds a run whose tasks
+all have PRs waiting for the user and the user chooses to clean it up. The invocation is the
+user's consent, whatever `auto_cleanup` says; no model switch is needed.
+1. `worktree.sh config` and `worktree.sh rundir`; read `state.json`.
+2. For each task with status `pr-open` (staged: the run's `final_pr`), run
+   `pr.sh state <pr>`: `MERGED` → status `merged`; `OPEN` / `CLOSED` → report it and leave it.
+3. Run the [cleanup](references/execution-plan.md#6a-cleanup) and report what was cleaned and
+   what is left.
 
 ## Scripts and layout
 Script usage and exit codes, the worktree paths per layout, provisioning, and config overrides:

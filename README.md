@@ -52,9 +52,9 @@ To enforce this, the skill strictly separates responsibilities:
 ## Key benefits
 
 ### 🛡️ Zero unintended blast radius
-- **Guaranteed clean main checkout**: The Lead records a cryptographic baseline of your working tree before starting and verifies it at close-out.
+- **Guaranteed clean main checkout**: The Lead records a cryptographic baseline of your working tree before starting and verifies it at close-out. The only change it then makes there is the cleanup's fast-forward to your merged PRs, and only when the checkout has no uncommitted changes or local commits.
 - **Enforced file whitelists**: Every task gets an explicit glob whitelist (`<slug>.wl`). `check_scope.sh` blocks committed, staged, unstaged, or untracked changes outside that boundary.
-- **Human-in-the-loop control**: Nothing is dispatched until you approve the decision matrix and specs. That one approval also covers the commit, push and PR of every task that passes review; whether the PR is merged for you is your `autoMergeRisk` setting (by default every L/M-risk PR; H-risk PRs are yours to merge). Worktree cleanup always needs your explicit consent.
+- **Human-in-the-loop control**: Nothing is dispatched until you approve the decision matrix and specs. That one approval also covers the commit, push and PR of every task that passes review; whether the PR is merged for you is your `autoMergeRisk` setting (by default every L/M-risk PR; H-risk PRs are yours to merge), and by default (`autoCleanup`) it also covers cleaning up after each merged PR.
 
 ### 🔍 Higher code quality through adversarial verification
 - **Evidence-based read-only audit**: Produces a structured gap report with `file:line`, severity, concrete evidence, and proposed fixes before a single line of code is touched.
@@ -122,9 +122,12 @@ flowchart LR
    approved tasks are committed locally and merged into `sop-stage/<n>` before the next stage
    starts, and the last stage becomes a single PR; between stages the run stays in the same
    session unless its context has grown large, when the Lead offers a fresh one.
-7. **Close-out** — verify the baseline is unchanged, summarise each PR's state, remove
-   worktrees, and archive the run dir. Deleting worktrees and the run dir requires explicit
-   user consent.
+7. **Close-out** — verify the baseline is unchanged and summarise each PR's state. For every
+   merged PR, remove its worktrees and local branches, fast-forward your checkout's branch to
+   origin (skipped if it has uncommitted changes or local commits), and archive the run dir
+   once every task is cleaned up — automatically with `autoCleanup` (default), otherwise after
+   asking. PRs left for you to merge (H risk) keep their worktrees; after merging them, run
+   `/spec-ops-pipeline cleanup`.
 
 The full procedure lives in [SKILL.md](skills/spec-ops-pipeline/SKILL.md).
 
@@ -236,7 +239,12 @@ you to start a fresh session once, and continue with:
 ```
 
 Your checkpoint approval covers the commit, push and PR of every approved task (and the merge,
-per [`autoMergeRisk`](#auto-merge-modes)). Worktree removal is always confirmed with you first.
+per [`autoMergeRisk`](#auto-merge-modes)) and, with `autoCleanup` (default), the cleanup after
+each merged PR. Once you have merged the PRs left to you, finish the cleanup with:
+
+```text
+/spec-ops-pipeline cleanup
+```
 
 ### Default model assignment
 
@@ -290,14 +298,15 @@ For repos that deviate, add `.agents/spec-ops-pipeline.json`:
   "workerNotes": "Run tests with `make test`, never `pytest` directly.",
   "offerBareLayout": false,
   "autoMergeRisk": ["L", "M"],
-  "mergeMethod": "squash"
+  "mergeMethod": "squash",
+  "autoCleanup": true
 }
 ```
 
 Settings you want in every repo go in the user config, `~/.config/spec-ops-pipeline/config.json`
 (or `$XDG_CONFIG_HOME/spec-ops-pipeline/config.json`; env `SOP_USER_CONFIG` names another file).
-It takes the repo-independent keys `autoMergeRisk`, `mergeMethod`, `maxParallel`, `workerNotes`
-and `offerBareLayout`; a repo's `.agents/spec-ops-pipeline.json` overrides it key by key.
+It takes the repo-independent keys `autoMergeRisk`, `mergeMethod`, `autoCleanup`, `maxParallel`,
+`workerNotes` and `offerBareLayout`; a repo's `.agents/spec-ops-pipeline.json` overrides it key by key.
 
 ```json
 {
@@ -318,6 +327,13 @@ every task qualifies. The older `autoMerge` (`manual`, `low-risk`, `all`) is sti
 `mergeMethod` is `squash` (default), `merge` or `rebase`. You can change the list, or a single
 task's Merge value, when you approve the checkpoint.
 
+`autoCleanup` (default `true`) lets the Lead clean up after merged PRs without asking: remove
+the task and stage worktrees and their local branches (also squash- or rebase-merged ones, once
+`gh` confirms the PR is merged), fast-forward your checkout's branch to origin, and archive the
+run dir when nothing is left. It never uses `--force`: a worktree with uncommitted changes is
+kept and reported, and the fast-forward is skipped if your checkout has uncommitted changes or
+local commits. Set it to `false`, or say "no cleanup" at the checkpoint, to be asked instead.
+
 | Environment variable | Effect |
 | :--- | :--- |
 | `SOP_WORKTREE_ROOT` | Override the worktree root (wins over `worktreeRoot`) |
@@ -330,6 +346,7 @@ task's Merge value, when you approve the checkpoint.
 | `SOP_SESSION_SPLIT` | Fresh session for phase 2: `auto` (default; only for runs with an H-risk task, 3+ tasks or stages), `always`, `never` |
 | `SOP_AUTO_MERGE_RISK` | Risk levels to auto-merge, e.g. `L,M`, or `none` (wins over `autoMergeRisk`) |
 | `SOP_MERGE_METHOD` | `squash`, `merge` or `rebase` (wins over `mergeMethod`) |
+| `SOP_AUTO_CLEANUP` | `1` or `0` (wins over `autoCleanup`) |
 | `SOP_PR_TIMEOUT` | Seconds `pr.sh merge` waits for a PR's checks (default `1800`) |
 | `SOP_PR_CHECKS_DELAY` | Seconds before `pr.sh` asks again about a PR with no checks yet (default `20`) |
 | `SOP_LOG_TAIL` | Lines of log `run_logged.sh` prints on failure (default `40`) |
@@ -343,9 +360,9 @@ All scripts can also be used on their own.
 | Script | Purpose |
 | :--- | :--- |
 | [`detect_runtime.sh`](skills/spec-ops-pipeline/scripts/detect_runtime.sh) | Detect the agent ecosystem and print the phase 1 / phase 2 Lead and Worker models as JSON |
-| [`worktree.sh`](skills/spec-ops-pipeline/scripts/worktree.sh) | Layout-aware worktree lifecycle: `config`, `path`, `create`, `integrate`, `remove`, `list`, `status`, `provision`, `rundir` |
+| [`worktree.sh`](skills/spec-ops-pipeline/scripts/worktree.sh) | Layout-aware worktree lifecycle: `config`, `path`, `create`, `integrate`, `remove`, `list`, `status`, `provision`, `rundir`, `sync` |
 | [`run_logged.sh`](skills/spec-ops-pipeline/scripts/run_logged.sh) | Run a command with its output in a log file; print a one-line summary (plus the tail on failure) and keep the exit code |
-| [`pr.sh`](skills/spec-ops-pipeline/scripts/pr.sh) | `preflight` / `open` / `merge`: check that PRs can be opened, push a task branch and open (or reuse) its PR, wait for checks and merge it; prints one JSON line |
+| [`pr.sh`](skills/spec-ops-pipeline/scripts/pr.sh) | `preflight` / `open` / `merge` / `state`: check that PRs can be opened, push a task branch and open (or reuse) its PR, wait for checks and merge it, report a PR's state; prints one JSON line |
 | [`check_scope.sh`](skills/spec-ops-pipeline/scripts/check_scope.sh) | Fail if any changed file falls outside the whitelist; `--list` / `--overlap` show a whitelist's files and overlaps between whitelists at spec time |
 | [`migrate_to_bare.sh`](skills/spec-ops-pipeline/scripts/migrate_to_bare.sh) | Plan (default) or apply an in-place conversion to the bare-repo worktree layout |
 | [`wt.sh`](skills/spec-ops-pipeline/scripts/wt.sh) | Everyday branch worktrees in the bare layout — for people, not the Lead; `link-config` re-syncs the agent-config symlinks at the container root |

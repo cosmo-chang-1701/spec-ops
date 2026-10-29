@@ -54,14 +54,28 @@ check_eq "autoMergeRisk wins over autoMerge" "$(cfg_get '["auto_merge_risk"]')" 
 (cd "$std" && SOP_AUTO_MERGE=bogus bash "$W" config >/dev/null 2>&1); rc=$?
 check_eq "invalid SOP_AUTO_MERGE: exit 2" "$rc" 2
 
+section "config: autoCleanup"
+check_eq "autoCleanup defaults to true" "$(cfg_get '["auto_cleanup"]')" True
+echo '{"autoCleanup": false}' >"$cfgfile"
+check_eq "autoCleanup read from the config" "$(cfg_get '["auto_cleanup"]')" False
+check_eq "SOP_AUTO_CLEANUP=1 wins over the config" \
+  "$(cd "$std" && SOP_AUTO_CLEANUP=1 bash "$W" config | json_get '["auto_cleanup"]')" True
+(cd "$std" && SOP_AUTO_CLEANUP=yes bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "invalid SOP_AUTO_CLEANUP: exit 2" "$rc" 2
+echo '{"autoCleanup": "no"}' >"$cfgfile"
+(cd "$std" && bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "autoCleanup not a bool: exit 2" "$rc" 2
+
 section "config: user config"
 userfile=$XDG_CONFIG_HOME/spec-ops-pipeline/config.json
 mkdir -p "$(dirname "$userfile")"
-echo '{"autoMergeRisk": ["L"], "mergeMethod": "merge", "maxParallel": 6, "defaultBase": "nope"}' >"$userfile"
+echo '{"autoMergeRisk": ["L"], "mergeMethod": "merge", "maxParallel": 6, "autoCleanup": false,
+  "defaultBase": "nope"}' >"$userfile"
 echo '{"offerBareLayout": false}' >"$cfgfile"
 check_eq "user config found" "$(cfg_get '["user_config_file"]')" "$userfile"
 check_eq "autoMergeRisk from the user config" "$(cfg_get '["auto_merge_risk"]')" "['L']"
 check_eq "maxParallel from the user config" "$(cfg_get '["max_parallel"]')" 6
+check_eq "autoCleanup from the user config" "$(cfg_get '["auto_cleanup"]')" False
 check_eq "repo-only keys ignored in the user config" "$(cfg_get '["default_base"]')" HEAD
 echo '{"offerBareLayout": false, "autoMergeRisk": ["L", "M", "H"]}' >"$cfgfile"
 check_eq "repo config wins over the user config" "$(cfg_get '["auto_merge_risk"]')" "['L', 'M', 'H']"
@@ -186,6 +200,57 @@ check_eq "status lists task and stage" "$(cd "$std" && bash "$W" status | python
 (cd "$std" && bash "$W" remove --stage 1 >/dev/null 2>&1 && bash "$W" remove task-one >/dev/null 2>&1); rc=$?
 check_eq "remove stage and task" "$rc" 0
 check_eq "no spec-ops-pipeline worktrees left" "$(cd "$std" && bash "$W" list)" ""
+
+section "remove --pr-merged"
+t=$(cd "$std" && bash "$W" create squashed 2>/dev/null | json_get '["worktree_path"]')
+echo squashed >>"$t/a.txt" && git -C "$t" commit -qam squashed
+(cd "$std" && bash "$W" remove squashed >/dev/null 2>&1)
+check "unmerged branch kept without --pr-merged" git -C "$std" show-ref --verify -q refs/heads/sop/squashed
+t=$(cd "$std" && git worktree add -q "$WORK/sq2" sop/squashed && echo "$WORK/sq2")
+echo dirty >>"$t/a.txt"
+(cd "$std" && bash "$W" remove squashed --pr-merged >/dev/null 2>&1); rc=$?
+check_eq "--pr-merged still refuses a dirty worktree" "$rc" 2
+git -C "$t" checkout -q -- a.txt
+(cd "$std" && bash "$W" remove squashed --pr-merged >/dev/null 2>&1); rc=$?
+check_eq "--pr-merged exits 0" "$rc" 0
+check "--pr-merged deletes the unmerged branch" bash -c "! git -C '$std' show-ref --verify -q refs/heads/sop/squashed"
+
+section "sync"
+sync_json() { (cd "$std" && bash "$W" sync 2>/dev/null); }
+out=$(sync_json); rc=$?
+check_eq "up to date: exit 0" "$rc" 0
+check_eq "up to date: not updated" "$(json_get '["updated"]' <<<"$out")" False
+up=$WORK/std.up
+echo three >>"$up/a.txt" && git -C "$up" commit -qam three
+new=$(git -C "$up" rev-parse HEAD)
+echo untracked >"$std/scratch.txt"
+out=$(sync_json); rc=$?
+check_eq "behind upstream: exit 0" "$rc" 0
+check_eq "behind upstream: fast-forwarded" "$(git -C "$std" rev-parse HEAD)" "$new"
+check_eq "behind upstream: updated" "$(json_get '["updated"]' <<<"$out")" True
+check "untracked files kept" test -f "$std/scratch.txt"
+rm "$std/scratch.txt"
+echo four >>"$up/a.txt" && git -C "$up" commit -qam four
+echo dirty >>"$std/a.txt"
+out=$(sync_json); rc=$?
+check_eq "tracked changes: exit 1" "$rc" 1
+check_eq "tracked changes: reason" "$(json_get '["reason"]' <<<"$out")" "uncommitted changes"
+check_eq "tracked changes: HEAD unchanged" "$(git -C "$std" rev-parse HEAD)" "$new"
+git -C "$std" checkout -q -- a.txt
+echo local >>"$std/b.txt" && git -C "$std" add b.txt && git -C "$std" commit -qm local
+out=$(sync_json); rc=$?
+check_eq "local commits: exit 1" "$rc" 1
+check_eq "local commits: reason" "$(json_get '["reason"]' <<<"$out")" "local commits not on origin"
+git -C "$std" reset -q --hard "$new"
+git -C "$std" checkout -q --detach
+out=$(sync_json); rc=$?
+check_eq "detached HEAD: exit 1" "$rc" 1
+git -C "$std" checkout -q main
+(cd "$std" && bash "$W" sync extra >/dev/null 2>&1); rc=$?
+check_eq "sync with an argument: exit 2" "$rc" 2
+bare_out=$(cd "$repo" && bash "$W" sync 2>/dev/null); rc=$?
+check_eq "bare layout: syncs the default-branch worktree" "$rc" 0
+check_eq "bare layout: worktree is main/" "$(json_get '["worktree"]' <<<"$bare_out")" "$repo/main"
 
 section "remove: docker compose down"
 # Fake docker: logs "<cwd>|<args>", prints $DOCKER_ROWS for `ps`, exits $DOCKER_DOWN_RC for `compose`.

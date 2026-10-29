@@ -50,7 +50,7 @@
 ### 🛡️ 零意外波及（絕對的變更邊界與安全性）
 - **主工作目錄 100% 不受影響**：Lead 在開始前會記錄主 checkout 的狀態基準（baseline），並在收尾時再次比對確認。
 - **強制執行的檔案白名單**：每個任務都有專屬的白名單（`<slug>.wl`），`check_scope.sh` 會攔截任何超出範圍的變更（包含已 commit、已 stage、未 stage 或未追蹤檔案）。
-- **關鍵決策由你掌控**：在你核准決策矩陣與 spec 之前，不會派出任何 Worker。這一次核准同時涵蓋每個通過審查任務的 commit、push 與開 PR；是否自動合併 PR 則由 `autoMerge` 設定決定（`manual`、`low-risk` 或 `all`）。刪除 worktree 一律需要你的明確同意。
+- **關鍵決策由你掌控**：在你核准決策矩陣與 spec 之前，不會派出任何 Worker。這一次核准同時涵蓋每個通過審查任務的 commit、push 與開 PR；是否自動合併 PR 則由 `autoMergeRisk` 設定決定（預設 L/M 風險自動合併，H 風險由你合併）。刪除 worktree 一律需要你的明確同意。
 
 ### 🔍 雙重把關帶來更高品質的程式碼
 - **具證據力的唯讀稽核**：動手修改前，先產出包含 `file:line`、嚴重程度、具體證據與修正建議的缺口報告（gap report）。
@@ -64,7 +64,7 @@
 
 ### 💡 極致精簡 Context 視窗並節省 Token 成本
 - **單行 Log 濃縮機制**：所有 test、lint 與 build 指令皆透過 `run_logged.sh` 執行，只回傳一行執行摘要（僅在失敗時附上最後幾行 log），避免冗長的測試輸出塞爆 Lead 的 context。
-- **兩階段 Session 切分**：多任務或高風險流程會將狀態保存在 `<git-common-dir>/sop-run/`，讓規劃（Phase 1）與執行（Phase 2）分開在不同 session 進行，維持最佳推理品質。
+- **兩階段 Session 切分**：含 H 風險任務、3 個以上任務或分階段的流程會將狀態保存在 `<git-common-dir>/sop-run/`，讓規劃（Phase 1）與執行（Phase 2）分開在不同 session 進行，維持最佳推理品質。
 - **依任務性質自動分配最佳模型**：自動偵測 Claude Code、Codex CLI 或 Antigravity 環境，在 Phase 1 採用高階推理模型做稽核與規格設計，在 Phase 2 與 Worker 採用快速、高性價比的模型執行實作。
 
 ### 🔧 零設定且自動適應 Repo 佈局
@@ -85,7 +85,7 @@ flowchart LR
     E --> F[5. 審查<br/>最多 3 輪]
     F -->|REQUEST_CHANGES| D
     F -->|下一階段| D
-    F -->|APPROVE| PR[Commit + PR<br/>依 autoMerge 合併]
+    F -->|APPROVE| PR[Commit + PR<br/>依 autoMergeRisk 合併]
     PR --> G[6. 收尾]
     end
 ```
@@ -100,16 +100,16 @@ flowchart LR
    風險與共用資源），再附完整 spec。**使用者核准前不會派出任何 Worker。**
    核准後，Lead 把 `state.json` 寫入 run dir 並結束 phase 1：執行 `/clear`、切換到 phase 2 的
    Lead 模型，再以 `resume` 呼叫本 skill。新的 session 會先核對基準狀態與 base commit，只讀取
-   執行計畫與當前階段的 spec，然後接續執行。小型流程（單一任務、風險 L 或 M）則不換 session，
+   執行計畫與當前階段的 spec，然後接續執行。小型流程（`independent` 模式下 1–2 個 L/M 風險任務）則不換 session，
    直接以 phase 1 的 Lead 模型繼續；可設定 `SOP_SESSION_SPLIT=always|never`，或在核准時說明來改變。
 4. **Worktree + 派工**：為每個任務在 `sop/<slug>` 分支上建立 worktree，並平行派出該階段的
    Worker（詳見 [dispatch.md](skills/spec-ops-pipeline/references/dispatch.md)）。
 5. **檢查**：執行 `check_scope.sh`，再透過 `run_logged.sh` 重新執行所有 DoD 指令，全部都必須通過。
 6. **審查**：依照[審查清單](skills/spec-ops-pipeline/references/review-checklist.md)，對照記錄的基準審查 diff：
    由 phase 1 Lead 模型的唯讀 Reviewer subagent 進行審查，Lead 再驗證它的意見。APPROVE 後，
-   任務會自動 commit、push 並開 PR，`autoMerge` 允許時再合併該 PR（[模式](#自動合併模式)）。
+   任務會自動 commit、push 並開 PR，`autoMergeRisk` 允許時再合併該 PR（[規則](#自動合併模式)）。
    在 staged 模式下，核准的任務會先在本機 commit 並合併到 `sop-stage/<n>`，才進入下一階段，
-   最後一個階段整合成單一 PR；階段之間也可以再換到新的 session 繼續。
+   最後一個階段整合成單一 PR；階段之間預設留在同一個 session，只有 context 明顯變大時 Lead 才會提議換新 session。
 7. **收尾**：確認基準狀態未變、彙整每個 PR 的狀態、移除 worktree，並封存 run dir。
    刪除 worktree 與 run dir 需要使用者明確同意。
 
@@ -207,8 +207,8 @@ ln -s ~/src/spec-ops-pipeline/skills/spec-ops-pipeline \
 ```
 
 一般流程會停下來等你兩次：一次是議定稽核範圍，一次是核准缺口報告、spec 與執行計畫。
-核准之後，單一 L/M 風險任務會直接在同一個 session 繼續；規模更大時，Lead 會請你開一個新的
-session 接續：
+核准之後，1–2 個 L/M 風險任務會直接在同一個 session 繼續；含 H 風險任務、3 個以上任務或
+分階段的流程，Lead 會請你開一次新的 session 接續：
 
 ```text
 /clear
@@ -216,7 +216,7 @@ session 接續：
 /spec-ops-pipeline resume
 ```
 
-你在 checkpoint 的核准涵蓋每個通過審查任務的 commit、push 與開 PR（以及依 [`autoMerge`](#自動合併模式) 的合併）。移除 worktree 一律會先徵求你的同意。
+你在 checkpoint 的核准涵蓋每個通過審查任務的 commit、push 與開 PR（以及依 [`autoMergeRisk`](#自動合併模式) 的合併）。移除 worktree 一律會先徵求你的同意。
 
 ### 預設模型分配
 
@@ -264,35 +264,46 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
   "maxParallel": 4,
   "workerNotes": "Run tests with `make test`, never `pytest` directly.",
   "offerBareLayout": false,
-  "autoMerge": "low-risk",
+  "autoMergeRisk": ["L", "M"],
+  "mergeMethod": "squash"
+}
+```
+
+想套用到所有 repo 的設定，放在使用者設定檔 `~/.config/spec-ops-pipeline/config.json`
+（或 `$XDG_CONFIG_HOME/spec-ops-pipeline/config.json`；可用環境變數 `SOP_USER_CONFIG` 指定其他檔案）。
+它只讀取與 repo 無關的 `autoMergeRisk`、`mergeMethod`、`maxParallel`、`workerNotes`、
+`offerBareLayout`；各 repo 的 `.agents/spec-ops-pipeline.json` 會逐項覆寫它。
+
+```json
+{
+  "autoMergeRisk": ["L", "M"],
   "mergeMethod": "squash"
 }
 ```
 
 ### 自動合併模式
 
-通過審查的任務都會有一個 PR；`autoMerge` 決定 Lead 接著要合併哪些（PR 的 checks 通過後才合併，
-絕不使用 `--admin`，合併後會刪除遠端分支）：
+通過審查的任務都會有一個 PR；`autoMergeRisk` 列出 Lead 接著要自動合併哪些風險層級的 PR
+（PR 的 checks 通過後才合併，絕不使用 `--admin`，合併後會刪除遠端分支）。預設 `["L", "M"]`，
+只有 H 風險的 PR 留給你合併；`[]` 表示全部由你合併，`["L", "M", "H"]` 表示全部自動合併。
+任務還必須在第 1 輪審查就通過、且未升級到較強的 Worker 模型，PR 才會自動合併；`staged` 模式下
+須每個任務都符合，才會合併那個單一 PR。舊的 `autoMerge`（`manual`、`low-risk`、`all`）仍可使用，
+分別視為 `[]`、`["L"]`、`["L", "M", "H"]`。
 
-| `autoMerge` | 自動合併的 PR |
-| :--- | :--- |
-| `manual` | 全部不合併，由你自己合併 |
-| `low-risk`（預設） | L 風險、第 1 輪審查就通過且未升級到較強 Worker 模型的任務；`staged` 模式下須每個任務都符合 |
-| `all` | 全部 |
-
-`mergeMethod` 可設為 `squash`（預設）、`merge` 或 `rebase`。核准 checkpoint 時，你可以更改模式，
-或只更改單一任務的 Merge 欄位。
+`mergeMethod` 可設為 `squash`（預設）、`merge` 或 `rebase`。核准 checkpoint 時，你可以更改風險
+清單，或只更改單一任務的 Merge 欄位。
 
 | 環境變數 | 作用 |
 | :--- | :--- |
 | `SOP_WORKTREE_ROOT` | 覆寫 worktree 根目錄（優先於 `worktreeRoot`） |
 | `SOP_CONFIG` | 指定設定檔路徑，取代 `.agents/spec-ops-pipeline.json` |
+| `SOP_USER_CONFIG` | 使用者設定檔路徑（預設 `~/.config/spec-ops-pipeline/config.json`） |
 | `SOP_PROVISION=0` | 停用 `.env` / `.venv` 的自動配置 |
 | `SOP_BRANCH_PREFIX` | 任務分支前綴（預設 `sop/`） |
 | `SOP_STAGE_PREFIX` | 階段分支前綴（預設 `sop-stage/`） |
 | `SOP_ECOSYSTEM` | 強制指定執行環境生態系（`claude`、`gemini`、`codex`） |
-| `SOP_SESSION_SPLIT` | phase 2 是否換新 session：`auto`（預設；僅多任務或 H 風險時）、`always`、`never` |
-| `SOP_AUTO_MERGE` | `manual`、`low-risk` 或 `all`（優先於 `autoMerge`） |
+| `SOP_SESSION_SPLIT` | phase 2 是否換新 session：`auto`（預設；僅含 H 風險任務、3 個以上任務或分階段時）、`always`、`never` |
+| `SOP_AUTO_MERGE_RISK` | 自動合併的風險層級，例如 `L,M`，或 `none`（優先於 `autoMergeRisk`） |
 | `SOP_MERGE_METHOD` | `squash`、`merge` 或 `rebase`（優先於 `mergeMethod`） |
 | `SOP_PR_TIMEOUT` | `pr.sh merge` 等待 PR checks 的秒數（預設 `1800`） |
 | `SOP_PR_CHECKS_DELAY` | PR 尚無 checks 時，`pr.sh` 再次查詢前等待的秒數（預設 `20`） |

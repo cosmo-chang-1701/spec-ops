@@ -54,7 +54,7 @@ To enforce this, the skill strictly separates responsibilities:
 ### 🛡️ Zero unintended blast radius
 - **Guaranteed clean main checkout**: The Lead records a cryptographic baseline of your working tree before starting and verifies it at close-out.
 - **Enforced file whitelists**: Every task gets an explicit glob whitelist (`<slug>.wl`). `check_scope.sh` blocks committed, staged, unstaged, or untracked changes outside that boundary.
-- **Human-in-the-loop control**: Nothing is dispatched until you approve the decision matrix and specs. That one approval also covers the commit, push and PR of every task that passes review; whether the PR is merged for you is your `autoMerge` setting (`manual`, `low-risk` or `all`). Worktree cleanup always needs your explicit consent.
+- **Human-in-the-loop control**: Nothing is dispatched until you approve the decision matrix and specs. That one approval also covers the commit, push and PR of every task that passes review; whether the PR is merged for you is your `autoMergeRisk` setting (by default every L/M-risk PR; H-risk PRs are yours to merge). Worktree cleanup always needs your explicit consent.
 
 ### 🔍 Higher code quality through adversarial verification
 - **Evidence-based read-only audit**: Produces a structured gap report with `file:line`, severity, concrete evidence, and proposed fixes before a single line of code is touched.
@@ -68,7 +68,7 @@ To enforce this, the skill strictly separates responsibilities:
 
 ### 💡 Lean context window & lower token costs
 - **1-line log compression**: Every test, linter, and build runs through `run_logged.sh`, returning a single summary line (plus log tail only on failure) so verbose test suites never pollute the Lead's context.
-- **Two-phase session splitting**: Multi-task or high-risk runs persist state in `<git-common-dir>/sop-run/` and split between planning (Phase 1) and execution (Phase 2), keeping context sharp and focused.
+- **Two-phase session splitting**: Runs with an H-risk task, three or more tasks, or stages persist state in `<git-common-dir>/sop-run/` and split between planning (Phase 1) and execution (Phase 2), keeping context sharp and focused.
 - **Right-sized model routing**: Automatically pairs top-tier reasoning models for Phase 1 auditing/spec-writing with faster, cost-effective models for Phase 2 orchestration and Worker implementation across Claude Code, Codex CLI, and Antigravity.
 
 ### 🔧 Zero-config & layout-aware
@@ -89,7 +89,7 @@ flowchart LR
     E --> F[5. Review<br/>≤ 3 rounds]
     F -->|REQUEST_CHANGES| D
     F -->|next stage| D
-    F -->|APPROVE| PR[Commit + PR<br/>merge per autoMerge]
+    F -->|APPROVE| PR[Commit + PR<br/>merge per autoMergeRisk]
     PR --> G[6. Close-out]
     end
 ```
@@ -107,8 +107,8 @@ flowchart LR
    After approval the Lead writes `state.json` to the run dir and ends phase 1: run `/clear`,
    switch to the phase 2 Lead model, and invoke the skill with `resume`. The new session
    checks the baseline and base commit, reads only the plan and the current stage's specs,
-   and continues. A small run (one task, risk L or M) skips the new session and continues
-   right away on the phase 1 Lead model; set `SOP_SESSION_SPLIT=always|never` or say so at
+   and continues. A small run (one or two L/M-risk tasks, `independent` mode) skips the new
+   session and continues right away on the phase 1 Lead model; set `SOP_SESSION_SPLIT=always|never` or say so at
    the checkpoint to change that.
 4. **Worktree + dispatch** — create one worktree per task on branch `sop/<slug>` and
    dispatch the stage's Workers in parallel (see [dispatch.md](skills/spec-ops-pipeline/references/dispatch.md)).
@@ -118,10 +118,10 @@ flowchart LR
    [review checklist](skills/spec-ops-pipeline/references/review-checklist.md): a read-only
    Reviewer subagent on the phase 1 Lead model does the review and the Lead verifies its
    findings. On APPROVE the task is committed, pushed and opened as a PR automatically, and the
-   PR is merged when `autoMerge` allows it ([modes](#auto-merge-modes)). In staged mode,
+   PR is merged when `autoMergeRisk` allows it ([rules](#auto-merge-modes)). In staged mode,
    approved tasks are committed locally and merged into `sop-stage/<n>` before the next stage
-   starts, and the last stage becomes a single PR; between stages the user may again continue in
-   a fresh session.
+   starts, and the last stage becomes a single PR; between stages the run stays in the same
+   session unless its context has grown large, when the Lead offers a fresh one.
 7. **Close-out** — verify the baseline is unchanged, summarise each PR's state, remove
    worktrees, and archive the run dir. Deleting worktrees and the run dir requires explicit
    user consent.
@@ -225,9 +225,9 @@ Review the worker's branch sop/fix-token-expiry before merging.
 ```
 
 A typical run pauses twice for your input: once to agree on audit scope, and once to
-approve the gap report, specs and execution plan. A single L/M-risk task then continues in
-the same session. For anything larger, the Lead asks you to start a fresh session and
-continue with:
+approve the gap report, specs and execution plan. One or two L/M-risk tasks then continue in
+the same session. For a run with an H-risk task, three or more tasks, or stages, the Lead asks
+you to start a fresh session once, and continue with:
 
 ```text
 /clear
@@ -236,7 +236,7 @@ continue with:
 ```
 
 Your checkpoint approval covers the commit, push and PR of every approved task (and the merge,
-per [`autoMerge`](#auto-merge-modes)). Worktree removal is always confirmed with you first.
+per [`autoMergeRisk`](#auto-merge-modes)). Worktree removal is always confirmed with you first.
 
 ### Default model assignment
 
@@ -289,34 +289,46 @@ For repos that deviate, add `.agents/spec-ops-pipeline.json`:
   "maxParallel": 4,
   "workerNotes": "Run tests with `make test`, never `pytest` directly.",
   "offerBareLayout": false,
-  "autoMerge": "low-risk",
+  "autoMergeRisk": ["L", "M"],
+  "mergeMethod": "squash"
+}
+```
+
+Settings you want in every repo go in the user config, `~/.config/spec-ops-pipeline/config.json`
+(or `$XDG_CONFIG_HOME/spec-ops-pipeline/config.json`; env `SOP_USER_CONFIG` names another file).
+It takes the repo-independent keys `autoMergeRisk`, `mergeMethod`, `maxParallel`, `workerNotes`
+and `offerBareLayout`; a repo's `.agents/spec-ops-pipeline.json` overrides it key by key.
+
+```json
+{
+  "autoMergeRisk": ["L", "M"],
   "mergeMethod": "squash"
 }
 ```
 
 <a id="auto-merge-modes"></a>
-Every task that passes review gets a PR. `autoMerge` decides which of them the Lead then merges
-(after the PR's checks pass, never with `--admin`, deleting the remote branch afterwards):
+Every task that passes review gets a PR. `autoMergeRisk` lists the risk levels whose PRs the
+Lead then merges (after the PR's checks pass, never with `--admin`, deleting the remote branch
+afterwards). The default, `["L", "M"]`, leaves only H-risk PRs to you; `[]` leaves all of them,
+`["L", "M", "H"]` none. A PR is merged only if its task was also approved in review round 1 and
+not escalated to the stronger Worker model; in `staged` mode the single PR is merged only if
+every task qualifies. The older `autoMerge` (`manual`, `low-risk`, `all`) is still read as
+`[]`, `["L"]` and `["L", "M", "H"]`.
 
-| `autoMerge` | PRs merged automatically |
-| :--- | :--- |
-| `manual` | None — you merge them |
-| `low-risk` (default) | Risk **L** tasks approved in review round 1 and not escalated to the stronger Worker model; in `staged` mode only if every task qualifies |
-| `all` | All of them |
-
-`mergeMethod` is `squash` (default), `merge` or `rebase`. You can change the mode, or a single
+`mergeMethod` is `squash` (default), `merge` or `rebase`. You can change the list, or a single
 task's Merge value, when you approve the checkpoint.
 
 | Environment variable | Effect |
 | :--- | :--- |
 | `SOP_WORKTREE_ROOT` | Override the worktree root (wins over `worktreeRoot`) |
 | `SOP_CONFIG` | Path to a config file to use instead of `.agents/spec-ops-pipeline.json` |
+| `SOP_USER_CONFIG` | Path to the user config (default `~/.config/spec-ops-pipeline/config.json`) |
 | `SOP_PROVISION=0` | Disable auto-provisioning of `.env` / `.venv` |
 | `SOP_BRANCH_PREFIX` | Task branch prefix (default `sop/`) |
 | `SOP_STAGE_PREFIX` | Stage branch prefix (default `sop-stage/`) |
 | `SOP_ECOSYSTEM` | Force the runtime ecosystem (`claude`, `gemini`, `codex`) |
-| `SOP_SESSION_SPLIT` | Fresh session for phase 2: `auto` (default; only for multi-task or H-risk runs), `always`, `never` |
-| `SOP_AUTO_MERGE` | `manual`, `low-risk` or `all` (wins over `autoMerge`) |
+| `SOP_SESSION_SPLIT` | Fresh session for phase 2: `auto` (default; only for runs with an H-risk task, 3+ tasks or stages), `always`, `never` |
+| `SOP_AUTO_MERGE_RISK` | Risk levels to auto-merge, e.g. `L,M`, or `none` (wins over `autoMergeRisk`) |
 | `SOP_MERGE_METHOD` | `squash`, `merge` or `rebase` (wins over `mergeMethod`) |
 | `SOP_PR_TIMEOUT` | Seconds `pr.sh merge` waits for a PR's checks (default `1800`) |
 | `SOP_PR_CHECKS_DELAY` | Seconds before `pr.sh` asks again about a PR with no checks yet (default `20`) |

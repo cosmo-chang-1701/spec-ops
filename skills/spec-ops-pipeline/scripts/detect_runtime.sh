@@ -12,14 +12,15 @@
 #   5. Fallback                (claude)
 #
 # Roles: "lead" runs phase 1 (preflight, audit, spec, checkpoint); "lead_phase2" runs
-# phase 2 (dispatch, gate, review, close-out) in a fresh session; "worker" implements;
+# phase 2 (dispatch, gate, review, close-out), in a fresh session for larger runs; "worker" implements;
 # "worker_light" implements small mechanical L-risk tasks; "scout" sweeps code read-only
 # during the audit (see references/models.md). The read-only Reviewer of a Worker's diff runs
 # on "lead" (use its dispatch_model).
 # Per-field overrides: SOP_LEAD_MODEL, SOP_LEAD_EFFORT, SOP_LEAD2_MODEL, SOP_LEAD2_EFFORT,
 # SOP_WORKER_MODEL, SOP_WORKER_EFFORT, SOP_WORKER_LIGHT_MODEL, SOP_WORKER_LIGHT_EFFORT,
 # SOP_SCOUT_MODEL, SOP_SCOUT_EFFORT.
-# Session split: SOP_SESSION_SPLIT = auto (default: split only multi-task or H-risk runs),
+# Session split: SOP_SESSION_SPLIT = auto (default: split only runs with an H-risk task,
+# three or more tasks, or staged mode),
 # always, or never; reported as "session_split".
 # Output: a single JSON object on stdout.
 set -euo pipefail

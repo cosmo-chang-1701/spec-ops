@@ -9,6 +9,9 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/sop-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=$WORK/gitconfig
+# Keep the user's own spec-ops-pipeline config out of the tests.
+export XDG_CONFIG_HOME=$WORK/xdg
+unset SOP_USER_CONFIG SOP_CONFIG SOP_AUTO_MERGE SOP_AUTO_MERGE_RISK SOP_MERGE_METHOD
 git config --global user.name test
 git config --global user.email test@example.com
 git config --global init.defaultBranch main

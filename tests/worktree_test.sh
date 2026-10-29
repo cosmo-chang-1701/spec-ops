@@ -21,23 +21,61 @@ check_eq "maxParallel read from main/.agents/spec-ops-pipeline.json" \
   "$(cd "$repo" && bash "$W" config | json_get '["max_parallel"]')" 2
 rm -r "$repo/main/.agents"
 
-section "config: autoMerge / mergeMethod"
+section "config: autoMergeRisk / mergeMethod"
 cfg_get() { (cd "$std" && bash "$W" config | json_get "$1"); }
+risk_get() { (cd "$std" && env "$@" bash "$W" config | json_get '["auto_merge_risk"]'); }
 cfgfile=$std/.agents/spec-ops-pipeline.json
-check_eq "autoMerge defaults to low-risk" "$(cfg_get '["auto_merge"]')" low-risk
+check_eq "autoMergeRisk defaults to L, M" "$(cfg_get '["auto_merge_risk"]')" "['L', 'M']"
 check_eq "mergeMethod defaults to squash" "$(cfg_get '["merge_method"]')" squash
-echo '{"autoMerge": "all", "mergeMethod": "rebase"}' >"$cfgfile"
-check_eq "autoMerge read from the config" "$(cfg_get '["auto_merge"]')" all
+echo '{"autoMergeRisk": ["H", "L"], "mergeMethod": "rebase"}' >"$cfgfile"
+check_eq "autoMergeRisk read from the config (ordered)" "$(cfg_get '["auto_merge_risk"]')" "['L', 'H']"
 check_eq "mergeMethod read from the config" "$(cfg_get '["merge_method"]')" rebase
-check_eq "SOP_AUTO_MERGE wins over the config" \
-  "$(cd "$std" && SOP_AUTO_MERGE=manual bash "$W" config | json_get '["auto_merge"]')" manual
+check_eq "SOP_AUTO_MERGE_RISK wins over the config" "$(risk_get SOP_AUTO_MERGE_RISK=M)" "['M']"
+check_eq "SOP_AUTO_MERGE_RISK=none" "$(risk_get SOP_AUTO_MERGE_RISK=none)" "[]"
 check_eq "SOP_MERGE_METHOD wins over the config" \
   "$(cd "$std" && SOP_MERGE_METHOD=merge bash "$W" config | json_get '["merge_method"]')" merge
-(cd "$std" && SOP_AUTO_MERGE=bogus bash "$W" config >/dev/null 2>&1); rc=$?
-check_eq "invalid SOP_AUTO_MERGE: exit 2" "$rc" 2
+(cd "$std" && SOP_AUTO_MERGE_RISK=X bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "invalid SOP_AUTO_MERGE_RISK: exit 2" "$rc" 2
+echo '{"autoMergeRisk": "L"}' >"$cfgfile"
+(cd "$std" && bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "autoMergeRisk not a list: exit 2" "$rc" 2
 echo '{"mergeMethod": "ff"}' >"$cfgfile"
 (cd "$std" && bash "$W" config >/dev/null 2>&1); rc=$?
 check_eq "invalid mergeMethod in the config: exit 2" "$rc" 2
+
+section "config: deprecated autoMerge"
+echo '{"autoMerge": "low-risk"}' >"$cfgfile"
+check_eq "autoMerge low-risk = L" "$(cfg_get '["auto_merge_risk"]')" "['L']"
+check_eq "SOP_AUTO_MERGE=all = L, M, H" "$(risk_get SOP_AUTO_MERGE=all)" "['L', 'M', 'H']"
+check_eq "SOP_AUTO_MERGE_RISK wins over SOP_AUTO_MERGE" \
+  "$(risk_get SOP_AUTO_MERGE=all SOP_AUTO_MERGE_RISK=none)" "[]"
+echo '{"autoMerge": "manual", "autoMergeRisk": ["M"]}' >"$cfgfile"
+check_eq "autoMergeRisk wins over autoMerge" "$(cfg_get '["auto_merge_risk"]')" "['M']"
+(cd "$std" && SOP_AUTO_MERGE=bogus bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "invalid SOP_AUTO_MERGE: exit 2" "$rc" 2
+
+section "config: user config"
+userfile=$XDG_CONFIG_HOME/spec-ops-pipeline/config.json
+mkdir -p "$(dirname "$userfile")"
+echo '{"autoMergeRisk": ["L"], "mergeMethod": "merge", "maxParallel": 6, "defaultBase": "nope"}' >"$userfile"
+echo '{"offerBareLayout": false}' >"$cfgfile"
+check_eq "user config found" "$(cfg_get '["user_config_file"]')" "$userfile"
+check_eq "autoMergeRisk from the user config" "$(cfg_get '["auto_merge_risk"]')" "['L']"
+check_eq "maxParallel from the user config" "$(cfg_get '["max_parallel"]')" 6
+check_eq "repo-only keys ignored in the user config" "$(cfg_get '["default_base"]')" HEAD
+echo '{"offerBareLayout": false, "autoMergeRisk": ["L", "M", "H"]}' >"$cfgfile"
+check_eq "repo config wins over the user config" "$(cfg_get '["auto_merge_risk"]')" "['L', 'M', 'H']"
+check_eq "other user keys still apply" "$(cfg_get '["merge_method"]')" merge
+echo '{"offerBareLayout": false, "autoMerge": "manual"}' >"$cfgfile"
+check_eq "repo autoMerge wins over user autoMergeRisk" "$(cfg_get '["auto_merge_risk"]')" "[]"
+echo '{"mergeMethod": "ff"}' >"$userfile"
+err=$(cd "$std" && bash "$W" config 2>&1 >/dev/null)
+check "invalid value names the user config" grep -qF "$userfile" <<<"$err"
+check_eq "SOP_USER_CONFIG overrides the path" \
+  "$(cd "$std" && SOP_USER_CONFIG=$cfgfile bash "$W" config | json_get '["user_config_file"]')" "$cfgfile"
+(cd "$std" && SOP_USER_CONFIG=$WORK/missing.json bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "unreadable SOP_USER_CONFIG: exit 2" "$rc" 2
+rm -r "$XDG_CONFIG_HOME"
 echo '{"offerBareLayout": false}' >"$cfgfile"
 
 section "status"

@@ -21,7 +21,7 @@ description: >-
 
 | Role | May | Must not |
 | :--- | :--- | :--- |
-| **Lead** (you) | Read/search code, run tests/linters/builds, write specs, reviews, and run state (in the run dir), create/remove/integrate worktrees via `worktree.sh`; after the user's explicit yes, convert the repo to the bare-repo worktree layout with `migrate_to_bare.sh --apply`; once the user approved it at the checkpoint, commit approved work on `sop/*` branches (in staged mode also between stages), and run `pr.sh open` / `pr.sh merge` to push, open the PR and — per `auto_merge` — merge it | Edit, create, delete, or move any application file — in the main checkout **or** in a worker worktree (sole exception: `migrate_to_bare.sh --apply` as above); resolve merge conflicts by hand; merge a task that was not APPROVEd, use `--admin`, or otherwise get around branch protection |
+| **Lead** (you) | Read/search code, run tests/linters/builds, write specs, reviews, and run state (in the run dir), create/remove/integrate worktrees via `worktree.sh`; after the user's explicit yes, convert the repo to the bare-repo worktree layout with `migrate_to_bare.sh --apply`; once the user approved it at the checkpoint, commit approved work on `sop/*` branches (in staged mode also between stages), and run `pr.sh open` / `pr.sh merge` to push, open the PR and — per `auto_merge_risk` — merge it | Edit, create, delete, or move any application file — in the main checkout **or** in a worker worktree (sole exception: `migrate_to_bare.sh --apply` as above); resolve merge conflicts by hand; merge a task that was not APPROVEd, use `--admin`, or otherwise get around branch protection |
 | **Worker** (subagent) | Edit files matched by its whitelist, inside its worktree, until the DoD passes | Touch non-whitelisted files, commit/push, or work outside its worktree |
 
 If the Lead is tempted to "just fix it quickly", write it into a spec instead.
@@ -44,9 +44,9 @@ silently continue — except in a `single`-session run, which keeps the phase 1 
   is needed. In a `single` run it continues in the same session on the phase 1 Lead model.
 
 Which one, from `session_split` (`detect_runtime.sh`, env `SOP_SESSION_SPLIT`):
-- `auto` (default) — `single` for a small run: exactly one task with risk L or M. `split`
-  for two or more tasks (including `staged`) or any H-risk task, where a fresh session keeps
-  the Lead's context small.
+- `auto` (default) — `split` for a run with any H-risk task, three or more tasks, or
+  `staged` mode, where a fresh session keeps the Lead's context small; `single` for the rest
+  (one or two L/M tasks in `independent` mode).
 - `always` → `split`; `never` → `single`.
 
 Show the result in the checkpoint report; an explicit request from the user there wins.
@@ -85,7 +85,7 @@ not explain a failure. Never let a full test suite's output into the conversatio
    `state.json` at the checkpoint).
 6. `bash SKILL_DIR/scripts/pr.sh preflight` — can PRs be opened (gh installed and logged in,
    `origin` set)? Note `ok` and `into`; `ok: false` means the run only commits locally, and
-   the checkpoint says so. Note `auto_merge` and `merge_method` from `worktree.sh config`
+   the checkpoint says so. Note `auto_merge_risk` and `merge_method` from `worktree.sh config`
    ([execution-plan.md](references/execution-plan.md#auto-merge-modes)).
 7. If `default_base` is not `HEAD`: `git fetch` its remote, then check
    `git rev-parse HEAD` equals `git rev-parse <default_base>`. If not, the audited code
@@ -202,21 +202,24 @@ the user.
 Tasks loop independently of each other. A `light` task that fails round 1 is re-dispatched on
 the `worker` model ([models.md](references/models.md#worker-tier)).
 - `independent`: on APPROVE, commit, push and open the PR with `pr.sh`, and merge it when the
-  task's Merge value and `auto_merge` allow — all under the checkpoint approval, with no
-  question ([execution-plan.md §4a](references/execution-plan.md#4a-after-approve-independent-mode)).
+  [auto-merge rules](references/execution-plan.md#auto-merge-modes) allow — all under the
+  checkpoint approval, with no question
+  ([execution-plan.md §4a](references/execution-plan.md#4a-after-approve-independent-mode)).
 - `staged`: when every task in the stage is APPROVED, commit each locally, run
   `worktree.sh integrate <n> --base <stage base> sop/<slug>...`, and pass the integration
   gate (all of the stage's DoD in the stage worktree) before starting the next stage. See
   execution-plan.md for conflicts, integration failures, and escalated tasks. With more
-  stages to go, set `current_stage` to the next one in `state.json` and offer the user a
-  fresh session (`/clear`, then `resume`) — safe here, since no Worker of the stage is active.
+  stages to go, set `current_stage` to the next one in `state.json` and go on in the same
+  session. Offer a fresh session (`/clear`, then `resume`) only when this session's context
+  has grown large — e.g. it already ran two stages, or the stage took several review
+  rounds; it is safe here, since no Worker of the stage is active.
 
 ### 6. Close-out
 1. Re-run the baseline command from step 0; it must match. If it does not, report exactly
    what changed in the main checkout — do not "fix" it yourself.
 2. PRs: `independent` PRs already exist (§5); list each task's PR and whether it is `merged`,
    `open` (with the reason) or local only. For `staged`, open the single PR from the last
-   `sop-stage/<n>` with `pr.sh` (merge per `auto_merge`, see
+   `sop-stage/<n>` with `pr.sh` (merge per `auto_merge_risk`, see
    [execution-plan.md §6](references/execution-plan.md#6-close-out)).
 3. With user consent, `bash SKILL_DIR/scripts/worktree.sh remove <slug>` for every task and
    `remove --stage <n>` for every stage (refuses dirty worktrees without `--force`; task

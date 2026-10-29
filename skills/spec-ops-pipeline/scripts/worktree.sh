@@ -38,9 +38,16 @@
 #   provision ({"copy": [...], "link": [...], "copyMode": "644"} replaces auto-discovery),
 #   maxParallel (Worker cap read by the Lead, default 4), workerNotes (extra Worker rules),
 #   offerBareLayout (false = never offer migrate_to_bare.sh on a standard repo),
-#   autoMerge ("manual" | "low-risk" | "all", default "low-risk"; env SOP_AUTO_MERGE: what
-#   happens to a task's PR once it is open and its review is APPROVE), mergeMethod
-#   ("squash" | "merge" | "rebase", default "squash"; env SOP_MERGE_METHOD).
+#   autoMergeRisk (risk levels whose PRs the Lead merges once open and APPROVEd, a subset of
+#   ["L", "M", "H"], default ["L", "M"]; env SOP_AUTO_MERGE_RISK="L,M" or "none"),
+#   mergeMethod ("squash" | "merge" | "rebase", default "squash"; env SOP_MERGE_METHOD).
+#   Deprecated: autoMerge / SOP_AUTO_MERGE ("manual" = none, "low-risk" = L, "all" = L,M,H),
+#   used only where autoMergeRisk / SOP_AUTO_MERGE_RISK is not set.
+#
+# User config — defaults for every repo, overridden key by key by the repo config:
+#   SOP_USER_CONFIG env, else ${XDG_CONFIG_HOME:-~/.config}/spec-ops-pipeline/config.json.
+#   Only the repo-independent keys are read from it: maxParallel, workerNotes,
+#   offerBareLayout, autoMergeRisk (or autoMerge), mergeMethod.
 #
 # Target root resolution (first hit wins):
 #   1. SOP_WORKTREE_ROOT env, or "worktreeRoot" in the repo config
@@ -119,6 +126,18 @@ find_config() {
   for candidate in "${candidates[@]}"; do
     if [[ -r $candidate ]]; then CONFIG_FILE=$candidate; return; fi
   done
+}
+
+# Prints the user config path if one is readable (see the header).
+find_user_config() {
+  if [[ -n ${SOP_USER_CONFIG:-} ]]; then
+    [[ -r $SOP_USER_CONFIG ]] || die "SOP_USER_CONFIG is not readable: $SOP_USER_CONFIG"
+    printf '%s' "$SOP_USER_CONFIG"
+    return
+  fi
+  local path=${XDG_CONFIG_HOME:-$HOME/.config}/spec-ops-pipeline/config.json
+  [[ -r $path ]] && printf '%s' "$path"
+  return 0
 }
 
 # cfg <dotted.key>: prints a scalar, or one line per list item; nothing if unset.
@@ -386,33 +405,73 @@ cmd_config() {
   command -v python3 >/dev/null || die "python3 is required"
   resolve_root
   provision_lists
+  local user_config
+  user_config=$(find_user_config)
   python3 - "$CONFIG_FILE" "$LAYOUT" "$REPO_NAME" "$ANCHOR_DIR" "$MAIN_WORKTREE" \
     "$SOURCE_WORKTREE" "$ROOT_DIR" "$RESOLVED_BY" "$PATH_STYLE" "$DEFAULT_BRANCH" \
     "$DEFAULT_BASE" "$BRANCH_PREFIX" "$STAGE_PREFIX" "$PROVISION_FROM" "$COPY_MODE" \
     "$(printf '%s\n' "${COPIES[@]}")" "$(printf '%s\n' "${LINKS[@]}")" \
-    "${SOP_AUTO_MERGE:-}" "${SOP_MERGE_METHOD:-}" <<'PY'
+    "$user_config" "${SOP_AUTO_MERGE_RISK:-}" "${SOP_AUTO_MERGE:-}" "${SOP_MERGE_METHOD:-}" <<'PY'
 import json, sys
 (config, layout, repo, anchor, main_wt, source, root, resolved_by, path_style,
  default_branch, default_base, branch_prefix, stage_prefix, provision_from, copy_mode,
- copies, links, env_auto_merge, env_merge_method) = sys.argv[1:20]
-data = json.load(open(config)) if config else {}
+ copies, links, user_config, env_auto_merge_risk, env_auto_merge,
+ env_merge_method) = sys.argv[1:22]
+RISKS = ("L", "M", "H")
+LEGACY_AUTO_MERGE = {"manual": [], "low-risk": ["L"], "all": list(RISKS)}
+USER_KEYS = ("maxParallel", "workerNotes", "offerBareLayout", "autoMergeRisk", "mergeMethod")
+
+def fail(message):
+    print(f"worktree: {message}", file=sys.stderr)
+    sys.exit(2)
+
+def legacy_auto_merge(value, where):
+    if value not in LEGACY_AUTO_MERGE:
+        fail(f"autoMerge must be one of: {' '.join(LEGACY_AUTO_MERGE)} (got '{value}' from {where})")
+    return LEGACY_AUTO_MERGE[value]
+
+def load(path):
+    layer = json.load(open(path)) if path else {}
+    if "autoMerge" in layer and "autoMergeRisk" not in layer:
+        layer["autoMergeRisk"] = legacy_auto_merge(layer["autoMerge"], f"autoMerge in {path}")
+    return layer
+
+# The repo config wins key by key; the user config only fills in USER_KEYS.
+data, origin = load(config), {}
+origin.update((key, config) for key in data)
+for key, value in load(user_config).items():
+    if key in USER_KEYS and key not in data:
+        data[key], origin[key] = value, user_config
 
 def choice(key, env_name, env_value, allowed, default):
     value = env_value or data.get(key, default)
     if value not in allowed:
-        where = f"env {env_name}" if env_value else f"{key} in {config}"
-        print(f"worktree: {key} must be one of: {' '.join(allowed)} (got '{value}' from {where})",
-              file=sys.stderr)
-        sys.exit(2)
+        where = f"env {env_name}" if env_value else f"{key} in {origin[key]}"
+        fail(f"{key} must be one of: {' '.join(allowed)} (got '{value}' from {where})")
     return value
 
-auto_merge = choice("autoMerge", "SOP_AUTO_MERGE", env_auto_merge,
-                    ("manual", "low-risk", "all"), "low-risk")
+def risk_levels():
+    if env_auto_merge_risk:
+        where = "env SOP_AUTO_MERGE_RISK"
+        value = [] if env_auto_merge_risk == "none" else \
+            [r.strip() for r in env_auto_merge_risk.split(",") if r.strip()]
+    elif env_auto_merge:
+        return legacy_auto_merge(env_auto_merge, "env SOP_AUTO_MERGE")
+    elif "autoMergeRisk" in data:
+        where, value = f"autoMergeRisk in {origin['autoMergeRisk']}", data["autoMergeRisk"]
+    else:
+        return ["L", "M"]
+    if not isinstance(value, list) or any(r not in RISKS for r in value):
+        fail(f"autoMergeRisk must be a list of {', '.join(RISKS)} (got {json.dumps(value)} from {where})")
+    return [r for r in RISKS if r in value]
+
+auto_merge_risk = risk_levels()
 merge_method = choice("mergeMethod", "SOP_MERGE_METHOD", env_merge_method,
                       ("squash", "merge", "rebase"), "squash")
 offer_bare = layout == "standard" and data.get("offerBareLayout", True) is not False
 print(json.dumps({
     "config_file": config or None,
+    "user_config_file": user_config or None,
     "layout": layout,
     "repo": repo,
     "anchor": anchor,
@@ -434,7 +493,7 @@ print(json.dumps({
     "max_parallel": data.get("maxParallel", 4),
     "worker_notes": data.get("workerNotes", []),
     "offer_bare_migration": offer_bare,
-    "auto_merge": auto_merge,
+    "auto_merge_risk": auto_merge_risk,
     "merge_method": merge_method,
 }, ensure_ascii=False, indent=2))
 PY

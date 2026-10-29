@@ -40,8 +40,12 @@ default-branch worktree or the container root) with keys `worktreeRoot`, `pathSt
 (`slug`|`branch`), `defaultBase`, `sourceWorktree`, `provision`
 (`{"copy": [...], "link": [...], "copyMode": "644"}`, replaces auto-discovery),
 `maxParallel`, `workerNotes`, `offerBareLayout` (`false` = never offer the conversion),
-`autoMerge` (`manual` | `low-risk` (default) | `all`; env `SOP_AUTO_MERGE`) and `mergeMethod`
-(`squash` (default) | `merge` | `rebase`; env `SOP_MERGE_METHOD`); see `worktree.sh --help`.
+`autoMergeRisk` (Risk levels whose PRs are merged automatically, default `["L", "M"]`; env
+`SOP_AUTO_MERGE_RISK=L,M|none`) and `mergeMethod` (`squash` (default) | `merge` | `rebase`; env
+`SOP_MERGE_METHOD`); see `worktree.sh --help`. The repo-independent keys (`maxParallel`,
+`workerNotes`, `offerBareLayout`, `autoMergeRisk`, `mergeMethod`) can also be set for every repo
+in the user config, `~/.config/spec-ops-pipeline/config.json` (`$XDG_CONFIG_HOME`, env
+`SOP_USER_CONFIG`); the repo config wins key by key.
 `pr.sh` reads `SOP_PR_TIMEOUT` (seconds to wait for checks, default 1800) and
 `SOP_PR_CHECKS_DELAY` (default 20).
 Branch prefixes: `SOP_BRANCH_PREFIX` (tasks, default `sop/`), `SOP_STAGE_PREFIX` (stages, default `sop-stage/`).

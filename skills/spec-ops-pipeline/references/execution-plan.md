@@ -65,7 +65,8 @@ Below the matrix, one line on the session plan
 ([SKILL.md](../SKILL.md#sessions-and-context)), so the user can override it with the approval:
 `Session: single (auto — 2 L/M tasks)` or `Session: split (auto — 3 tasks)`; the source is
 `auto`, `always`, `never` (from `SOP_SESSION_SPLIT`) or `user`. Then one line on the PRs:
-`PRs: open on APPROVE · auto-merge risk L, M (user config) · squash · into main`, or
+`PRs: open on APPROVE · auto-merge risk L, M (user config) · squash · into main · auto cleanup`
+(`manual cleanup` when `auto_cleanup` is false), or
 `PRs: local commits only — <pr.sh preflight reason>` when `pr.sh preflight` failed.
 
 **② Decisions for you** — one bullet each, empty section if none: every H-risk task, every
@@ -89,11 +90,14 @@ ask the user to approve it:
   commits and merges, and the PR from the last `sop-stage/<n>`), then push that branch and open
   a PR into the default branch;
 - for every task whose Merge is `auto`, merging that PR once its checks pass, with the
-  configured method, and deleting the remote head branch.
+  configured method, and deleting the remote head branch;
+- with `auto_cleanup`: at close-out, the [cleanup](#6a-cleanup) of every merged PR — removing
+  its task (and stage) worktrees and local branches, fast-forwarding `source_worktree`'s branch
+  to origin, and archiving the run dir once every task is cleaned.
 
-The user may narrow it (change the risk list, change one task to `manual`, or "no PRs": commit
-locally only). It never covers removing worktrees or archiving the run dir; those keep their own
-consent at close-out. Record the approval in `state.json` (§7) so a phase 2 session can rely on it.
+The user may narrow it (change the risk list, change one task to `manual`, "no PRs": commit
+locally only, or "no cleanup"). Without `auto_cleanup` (or after "no cleanup") the cleanup keeps
+its own consent at close-out. Record the approval in `state.json` (§7) so a phase 2 session can rely on it.
 
 ### Auto-merge modes
 `auto_merge_risk` in `worktree.sh config` lists the Risk levels whose PRs the Lead merges after
@@ -183,14 +187,31 @@ Never silently drop a task or its dependents.
   everything; stacked per-stage PRs only if the user asked for them at the checkpoint). Merge
   it with `pr.sh merge` only when **every** task meets the
   [auto-merge rules](#auto-merge-modes).
-- Removing worktrees and archiving the run dir still need the user's consent. A squash or
-  rebase merge leaves `sop/<slug>` "unmerged" for `worktree.sh remove`, which keeps the
-  branch; delete it with `git branch -D` after the user agrees, once its PR is `merged`.
-- Remove task worktrees with `worktree.sh remove <slug>` and stage worktrees with
-  `worktree.sh remove --stage <n>`. A stage branch built only from merges is deleted locally
-  (task branches are kept unless merged), so push or keep the PR's stage branch first.
-  `remove` first runs `docker compose down` (volumes kept) for Compose projects started only
-  from inside that worktree; one shared with another checkout is left running.
+  Record the PR as `final_pr` (and a non-success result as `final_pr_state`) in `state.json`.
+- Then the [cleanup](#6a-cleanup): without a question if the approval covers `auto_cleanup`,
+  otherwise only after the user agrees.
+
+## 6a. Cleanup
+Runs at close-out (§6) and from the skill's `cleanup` entry, after the baseline check (the
+fast-forward moves `source_worktree`'s HEAD). Log each script call through `run_logged.sh`
+(`cleanup-<step>.log`; the JSON is the last line). Never pass `--force`.
+1. **Check** — a PR counts as merged only if `pr.sh state <pr>` says `MERGED` (a task the Lead
+   merged at §4a is already `merged`). Tasks with an open or closed PR, local-only commits, or
+   status `deferred` / `escalated` are left alone and listed.
+2. **Remove** — `independent`: for each task whose PR is merged,
+   `worktree.sh remove <slug> --pr-merged` → status `cleaned`. `staged`: once `final_pr` is
+   merged, the same for every task, then `worktree.sh remove --stage <n> --pr-merged` for every
+   stage. `--pr-merged` lets `remove` delete a branch that a squash or rebase merge left
+   "unmerged"; a stage branch built only from merges is deleted anyway. `remove` refuses a
+   worktree with uncommitted changes: leave it and report it. It first runs
+   `docker compose down` (volumes kept) for Compose projects started only from inside that
+   worktree; one shared with another checkout is left running.
+3. **Sync** — if any PR was merged: `worktree.sh sync` fast-forwards `source_worktree`'s branch
+   to its upstream. Exit 1 (`synced: false`) means nothing changed; report its `reason`
+   (uncommitted changes, local commits not on origin, detached HEAD, failed fetch).
+4. **Archive** — when every task is `cleaned`: `worktree.sh rundir --archive` (keeps the plan,
+   specs and logs as `sop-run.<timestamp>/` in the git common dir). Otherwise keep the run dir,
+   so a later `cleanup` can finish once the user has merged the remaining PRs.
 
 ## 7. Run state
 `<run dir>/state.json` (run dir = `worktree.sh rundir`) is what a fresh phase 2 session
@@ -209,11 +230,14 @@ It records facts only — decisions stay in `plan.md` and the specs.
   "default_base_sha": "1a2b3c4d…",
   "auto_merge_risk": ["L", "M"],
   "merge_method": "squash",
+  "auto_cleanup": true,
   "pr_enabled": true,
   "pr_into": "main",
   "mode": "staged",
   "max_parallel": 4,
   "current_stage": 1,
+  "final_pr": null,
+  "final_pr_state": null,
   "stages": [
     {"n": 1, "status": "pending", "tasks": ["fix-auth-token", "add-rate-limit", "drop-dead-helpers"]},
     {"n": 2, "status": "pending", "tasks": ["migrate-callers"]}
@@ -229,7 +253,7 @@ It records facts only — decisions stay in `plan.md` and the specs.
   A resumed session always runs on the `lead_phase2` model, whichever it was.
 - Stage status: `pending` → `running` → `integrated` (or `deferred`).
 - Task status: `pending` → `dispatched` → `in-review` (with `round`) → `approved` →
-  `committed` → `pr-open` → `merged`, or `deferred` / `escalated`. `open_findings` holds the blocking findings of the
+  `committed` → `pr-open` → `merged` → `cleaned`, or `deferred` / `escalated`. `open_findings` holds the blocking findings of the
   last REQUEST_CHANGES, so a resumed session can re-dispatch with them.
 - `risk` and `merge` (`auto` | `manual`) come from the decision matrix; `ever_rejected` turns
   `true` on the first REQUEST_CHANGES (a failed gate counts) and never goes back, since `round`
@@ -238,5 +262,8 @@ It records facts only — decisions stay in `plan.md` and the specs.
   `pr.sh preflight` failed or the user asked for local commits only.
 - `worker_tier`: `light` or `standard` ([models.md](models.md#worker-tier)); set to
   `standard` when a `light` task is escalated, and a resumed session dispatches on that tier.
+- `auto_cleanup` is `false` if the user said "no cleanup" at the checkpoint, whatever the
+  config says. `final_pr` / `final_pr_state` are the `staged` run's single PR and its last
+  non-success `pr.sh` result (`null` in `independent` mode).
 - `approval` quotes what the user approved at the checkpoint; a resumed Lead never assumes
   more than it says.

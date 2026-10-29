@@ -6,8 +6,8 @@ Script paths are relative to the skill directory (`SKILL_DIR` in SKILL.md).
 | Script | Purpose | Exit codes |
 | :--- | :--- | :--- |
 | `scripts/detect_runtime.sh [--agent X]` | Ecosystem + model JSON | 0 ok, 2 usage |
-| `scripts/worktree.sh config\|path\|create\|integrate\|remove\|list\|status\|provision\|rundir` | Layout-aware worktree lifecycle with auto-provisioning; `integrate` builds a stage's `sop-stage/<n>` branch; `status` adds state, base, ahead count and change counts per task/stage; `rundir [--archive]` creates (or archives) the persistent run dir; `remove` runs `docker compose down` for the worktree's own Compose projects first (`SOP_COMPOSE_DOWN=0` disables) | 0 ok, 1 merge conflict (`integrate`) or dirty/missing (`status --check`), 2 error |
-| `scripts/pr.sh preflight\|open\|merge` | Opens an approved task's PR (push, `gh pr create`, reusing an open one) and merges it after its checks pass; one JSON line on stdout. `preflight` = can PRs be opened at all. Never uses `--admin` | 0 ok, 1 not done (JSON says why), 2 usage |
+| `scripts/worktree.sh config\|path\|create\|integrate\|remove\|list\|status\|provision\|rundir\|sync` | Layout-aware worktree lifecycle with auto-provisioning; `integrate` builds a stage's `sop-stage/<n>` branch; `status` adds state, base, ahead count and change counts per task/stage; `rundir [--archive]` creates (or archives) the persistent run dir; `remove` runs `docker compose down` for the worktree's own Compose projects first (`SOP_COMPOSE_DOWN=0` disables), and with `--pr-merged` also deletes a branch whose PR was squash- or rebase-merged; `sync` fast-forwards `source_worktree`'s branch to its upstream (JSON) | 0 ok, 1 merge conflict (`integrate`), dirty/missing (`status --check`) or skipped (`sync`, nothing changed), 2 error |
+| `scripts/pr.sh preflight\|open\|merge\|state` | Opens an approved task's PR (push, `gh pr create`, reusing an open one) and merges it after its checks pass; `state` reports a PR's `OPEN` / `MERGED` / `CLOSED`; one JSON line on stdout. `preflight` = can PRs be opened at all. Never uses `--admin` | 0 ok, 1 not done (JSON says why), 2 usage |
 | `scripts/run_logged.sh <log> '<command>'` | Runs a command with its output in a log file; prints a one-line summary (plus the tail on failure) | the command's exit code, 2 usage |
 | `scripts/check_scope.sh <wt> <whitelist> [--base ref]` | Whitelist gate on all changes | 0 ok, 1 violations, 2 usage |
 | `scripts/check_scope.sh --list <dir> <whitelist>` · `--overlap <dir> <whitelist>...` | Spec-time: tracked files a whitelist covers · files (`OVERLAP`) and patterns (`POSSIBLE`) shared between whitelists | 0 ok, 1 `OVERLAP` found, 2 usage |
@@ -42,8 +42,9 @@ default-branch worktree or the container root) with keys `worktreeRoot`, `pathSt
 `maxParallel`, `workerNotes`, `offerBareLayout` (`false` = never offer the conversion),
 `autoMergeRisk` (Risk levels whose PRs are merged automatically, default `["L", "M"]`; env
 `SOP_AUTO_MERGE_RISK=L,M|none`) and `mergeMethod` (`squash` (default) | `merge` | `rebase`; env
-`SOP_MERGE_METHOD`); see `worktree.sh --help`. The repo-independent keys (`maxParallel`,
-`workerNotes`, `offerBareLayout`, `autoMergeRisk`, `mergeMethod`) can also be set for every repo
+`SOP_MERGE_METHOD`) and `autoCleanup` (default `true`; env `SOP_AUTO_CLEANUP=1|0`); see
+`worktree.sh --help`. The repo-independent keys (`maxParallel`, `workerNotes`,
+`offerBareLayout`, `autoMergeRisk`, `mergeMethod`, `autoCleanup`) can also be set for every repo
 in the user config, `~/.config/spec-ops-pipeline/config.json` (`$XDG_CONFIG_HOME`, env
 `SOP_USER_CONFIG`); the repo config wins key by key.
 `pr.sh` reads `SOP_PR_TIMEOUT` (seconds to wait for checks, default 1800) and

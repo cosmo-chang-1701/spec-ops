@@ -48,9 +48,9 @@
 ## 使用本專案的好處
 
 ### 🛡️ 零意外波及（絕對的變更邊界與安全性）
-- **主工作目錄 100% 不受影響**：Lead 在開始前會記錄主 checkout 的狀態基準（baseline），並在收尾時再次比對確認。
+- **主工作目錄 100% 不受影響**：Lead 在開始前會記錄主 checkout 的狀態基準（baseline），並在收尾時再次比對確認。之後唯一會做的變動是清理時 fast-forward 到已合併的 PR，而且只在 checkout 沒有未 commit 變更或本機 commit 時進行。
 - **強制執行的檔案白名單**：每個任務都有專屬的白名單（`<slug>.wl`），`check_scope.sh` 會攔截任何超出範圍的變更（包含已 commit、已 stage、未 stage 或未追蹤檔案）。
-- **關鍵決策由你掌控**：在你核准決策矩陣與 spec 之前，不會派出任何 Worker。這一次核准同時涵蓋每個通過審查任務的 commit、push 與開 PR；是否自動合併 PR 則由 `autoMergeRisk` 設定決定（預設 L/M 風險自動合併，H 風險由你合併）。刪除 worktree 一律需要你的明確同意。
+- **關鍵決策由你掌控**：在你核准決策矩陣與 spec 之前，不會派出任何 Worker。這一次核准同時涵蓋每個通過審查任務的 commit、push 與開 PR；是否自動合併 PR 則由 `autoMergeRisk` 設定決定（預設 L/M 風險自動合併，H 風險由你合併）；預設（`autoCleanup`）也涵蓋 PR 合併後的清理。
 
 ### 🔍 雙重把關帶來更高品質的程式碼
 - **具證據力的唯讀稽核**：動手修改前，先產出包含 `file:line`、嚴重程度、具體證據與修正建議的缺口報告（gap report）。
@@ -110,8 +110,10 @@ flowchart LR
    任務會自動 commit、push 並開 PR，`autoMergeRisk` 允許時再合併該 PR（[規則](#自動合併模式)）。
    在 staged 模式下，核准的任務會先在本機 commit 並合併到 `sop-stage/<n>`，才進入下一階段，
    最後一個階段整合成單一 PR；階段之間預設留在同一個 session，只有 context 明顯變大時 Lead 才會提議換新 session。
-7. **收尾**：確認基準狀態未變、彙整每個 PR 的狀態、移除 worktree，並封存 run dir。
-   刪除 worktree 與 run dir 需要使用者明確同意。
+7. **收尾**：確認基準狀態未變、彙整每個 PR 的狀態。每個已合併的 PR 會移除其 worktree 與本機分支、
+   把你 checkout 的分支 fast-forward 到 origin（有未 commit 的變更或本機 commit 時跳過），所有任務
+   都清理完後封存 run dir；`autoCleanup`（預設）時自動進行，否則會先詢問。留給你合併的 PR（H 風險）
+   會保留 worktree，合併後執行 `/spec-ops-pipeline cleanup` 即可。
 
 完整流程請見 [SKILL.md](skills/spec-ops-pipeline/SKILL.md)。
 
@@ -216,7 +218,12 @@ ln -s ~/src/spec-ops-pipeline/skills/spec-ops-pipeline \
 /spec-ops-pipeline resume
 ```
 
-你在 checkpoint 的核准涵蓋每個通過審查任務的 commit、push 與開 PR（以及依 [`autoMergeRisk`](#自動合併模式) 的合併）。移除 worktree 一律會先徵求你的同意。
+你在 checkpoint 的核准涵蓋每個通過審查任務的 commit、push 與開 PR（以及依 [`autoMergeRisk`](#自動合併模式) 的合併），`autoCleanup`（預設）時也涵蓋每個已合併 PR
+的清理。你合併完留給你的 PR 後，用以下指令完成清理：
+
+```text
+/spec-ops-pipeline cleanup
+```
 
 ### 預設模型分配
 
@@ -265,13 +272,14 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
   "workerNotes": "Run tests with `make test`, never `pytest` directly.",
   "offerBareLayout": false,
   "autoMergeRisk": ["L", "M"],
-  "mergeMethod": "squash"
+  "mergeMethod": "squash",
+  "autoCleanup": true
 }
 ```
 
 想套用到所有 repo 的設定，放在使用者設定檔 `~/.config/spec-ops-pipeline/config.json`
 （或 `$XDG_CONFIG_HOME/spec-ops-pipeline/config.json`；可用環境變數 `SOP_USER_CONFIG` 指定其他檔案）。
-它只讀取與 repo 無關的 `autoMergeRisk`、`mergeMethod`、`maxParallel`、`workerNotes`、
+它只讀取與 repo 無關的 `autoMergeRisk`、`mergeMethod`、`autoCleanup`、`maxParallel`、`workerNotes`、
 `offerBareLayout`；各 repo 的 `.agents/spec-ops-pipeline.json` 會逐項覆寫它。
 
 ```json
@@ -293,6 +301,12 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 `mergeMethod` 可設為 `squash`（預設）、`merge` 或 `rebase`。核准 checkpoint 時，你可以更改風險
 清單，或只更改單一任務的 Merge 欄位。
 
+`autoCleanup`（預設 `true`）讓 Lead 在 PR 合併後不必詢問就清理：移除任務與階段的 worktree 及其
+本機分支（squash 或 rebase 合併的分支也會刪除，前提是 `gh` 確認 PR 已合併）、把你 checkout 的分支
+fast-forward 到 origin，沒有剩餘任務時封存 run dir。它絕不使用 `--force`：有未 commit 變更的
+worktree 會保留並回報；你的 checkout 有未 commit 的變更或本機 commit 時，會跳過 fast-forward。
+設為 `false`，或在核准 checkpoint 時說「不要清理」，就會改為先詢問你。
+
 | 環境變數 | 作用 |
 | :--- | :--- |
 | `SOP_WORKTREE_ROOT` | 覆寫 worktree 根目錄（優先於 `worktreeRoot`） |
@@ -305,6 +319,7 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 | `SOP_SESSION_SPLIT` | phase 2 是否換新 session：`auto`（預設；僅含 H 風險任務、3 個以上任務或分階段時）、`always`、`never` |
 | `SOP_AUTO_MERGE_RISK` | 自動合併的風險層級，例如 `L,M`，或 `none`（優先於 `autoMergeRisk`） |
 | `SOP_MERGE_METHOD` | `squash`、`merge` 或 `rebase`（優先於 `mergeMethod`） |
+| `SOP_AUTO_CLEANUP` | `1` 或 `0`（優先於 `autoCleanup`） |
 | `SOP_PR_TIMEOUT` | `pr.sh merge` 等待 PR checks 的秒數（預設 `1800`） |
 | `SOP_PR_CHECKS_DELAY` | PR 尚無 checks 時，`pr.sh` 再次查詢前等待的秒數（預設 `20`） |
 | `SOP_LOG_TAIL` | `run_logged.sh` 失敗時印出的 log 行數（預設 `40`） |
@@ -318,9 +333,9 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 | 腳本 | 用途 |
 | :--- | :--- |
 | [`detect_runtime.sh`](skills/spec-ops-pipeline/scripts/detect_runtime.sh) | 偵測 agent 生態系，並以 JSON 輸出 phase 1 / phase 2 的 Lead 與 Worker 模型 |
-| [`worktree.sh`](skills/spec-ops-pipeline/scripts/worktree.sh) | 感知佈局的 worktree 生命週期管理：`config`、`path`、`create`、`integrate`、`remove`、`list`、`status`、`provision`、`rundir` |
+| [`worktree.sh`](skills/spec-ops-pipeline/scripts/worktree.sh) | 感知佈局的 worktree 生命週期管理：`config`、`path`、`create`、`integrate`、`remove`、`list`、`status`、`provision`、`rundir`、`sync` |
 | [`run_logged.sh`](skills/spec-ops-pipeline/scripts/run_logged.sh) | 執行指令並把輸出寫入 log 檔；只印一行摘要（失敗時附最後幾行），並保留原本的 exit code |
-| [`pr.sh`](skills/spec-ops-pipeline/scripts/pr.sh) | `preflight` / `open` / `merge`：檢查能否開 PR、push 任務分支並開（或沿用）PR、等 checks 通過後合併；輸出一行 JSON |
+| [`pr.sh`](skills/spec-ops-pipeline/scripts/pr.sh) | `preflight` / `open` / `merge` / `state`：檢查能否開 PR、push 任務分支並開（或沿用）PR、等 checks 通過後合併、查詢 PR 狀態；輸出一行 JSON |
 | [`check_scope.sh`](skills/spec-ops-pipeline/scripts/check_scope.sh) | 有任何變更檔案超出白名單時回傳失敗；`--list` / `--overlap` 可在撰寫 spec 時列出白名單涵蓋的檔案與白名單之間的重疊 |
 | [`migrate_to_bare.sh`](skills/spec-ops-pipeline/scripts/migrate_to_bare.sh) | 規劃（預設）或執行就地轉換為 bare-repo worktree 佈局 |
 | [`wt.sh`](skills/spec-ops-pipeline/scripts/wt.sh) | 在 bare 佈局中管理日常分支 worktree——供人使用，而非 Lead；`link-config` 重新同步容器根目錄的 agent 設定 symlink |

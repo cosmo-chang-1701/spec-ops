@@ -8,14 +8,19 @@
 #   worktree.sh integrate <id> --base <ref> <branch>...
 #                                             # stage integration worktree on ${SOP_STAGE_PREFIX:-sop-stage/}<id>:
 #                                             # merges each branch (--no-ff) onto base; exit 1 on conflict
-#   worktree.sh remove <slug> [--force]       # remove worktree; delete branch only if merged
-#   worktree.sh remove --stage <id> [--force] # same, for a stage integration worktree
+#   worktree.sh remove <slug> [--force] [--pr-merged]
+#                                             # remove worktree; delete branch only if merged, or
+#                                             # with --pr-merged (its PR is merged, e.g. squashed)
+#   worktree.sh remove --stage <id> [--force] [--pr-merged]
+#                                             # same, for a stage integration worktree
 #   worktree.sh list                          # list task + stage worktrees (JSON lines, "kind")
 #   worktree.sh status [--check]              # list + state, base, ahead, change counts (JSON lines);
 #                                             # --check exits 1 if any is dirty or missing
 #   worktree.sh provision <worktree>          # provision an existing worktree (see below)
 #   worktree.sh rundir [--archive]            # persistent run dir <git common dir>/sop-run (JSON);
 #                                             # --archive renames it to sop-run.<UTC timestamp>
+#   worktree.sh sync                          # fast-forward the source worktree's branch to its
+#                                             # upstream (JSON); exit 1 = skipped, nothing changed
 #
 # Built-in defaults per layout (no config needed):
 #   Bare container (<root>/.bare + <root>/<branch>/ worktrees, e.g. <root>/main):
@@ -43,11 +48,13 @@
 #   mergeMethod ("squash" | "merge" | "rebase", default "squash"; env SOP_MERGE_METHOD).
 #   Deprecated: autoMerge / SOP_AUTO_MERGE ("manual" = none, "low-risk" = L, "all" = L,M,H),
 #   used only where autoMergeRisk / SOP_AUTO_MERGE_RISK is not set.
+#   autoCleanup (default true; env SOP_AUTO_CLEANUP=1|0): after a PR is merged the Lead removes
+#   its worktrees and branches, fast-forwards the source worktree and archives the run dir.
 #
 # User config — defaults for every repo, overridden key by key by the repo config:
 #   SOP_USER_CONFIG env, else ${XDG_CONFIG_HOME:-~/.config}/spec-ops-pipeline/config.json.
 #   Only the repo-independent keys are read from it: maxParallel, workerNotes,
-#   offerBareLayout, autoMergeRisk (or autoMerge), mergeMethod.
+#   offerBareLayout, autoMergeRisk (or autoMerge), mergeMethod, autoCleanup.
 #
 # Target root resolution (first hit wins):
 #   1. SOP_WORKTREE_ROOT env, or "worktreeRoot" in the repo config
@@ -411,15 +418,17 @@ cmd_config() {
     "$SOURCE_WORKTREE" "$ROOT_DIR" "$RESOLVED_BY" "$PATH_STYLE" "$DEFAULT_BRANCH" \
     "$DEFAULT_BASE" "$BRANCH_PREFIX" "$STAGE_PREFIX" "$PROVISION_FROM" "$COPY_MODE" \
     "$(printf '%s\n' "${COPIES[@]}")" "$(printf '%s\n' "${LINKS[@]}")" \
-    "$user_config" "${SOP_AUTO_MERGE_RISK:-}" "${SOP_AUTO_MERGE:-}" "${SOP_MERGE_METHOD:-}" <<'PY'
+    "$user_config" "${SOP_AUTO_MERGE_RISK:-}" "${SOP_AUTO_MERGE:-}" "${SOP_MERGE_METHOD:-}" \
+    "${SOP_AUTO_CLEANUP:-}" <<'PY'
 import json, sys
 (config, layout, repo, anchor, main_wt, source, root, resolved_by, path_style,
  default_branch, default_base, branch_prefix, stage_prefix, provision_from, copy_mode,
  copies, links, user_config, env_auto_merge_risk, env_auto_merge,
- env_merge_method) = sys.argv[1:22]
+ env_merge_method, env_auto_cleanup) = sys.argv[1:23]
 RISKS = ("L", "M", "H")
 LEGACY_AUTO_MERGE = {"manual": [], "low-risk": ["L"], "all": list(RISKS)}
-USER_KEYS = ("maxParallel", "workerNotes", "offerBareLayout", "autoMergeRisk", "mergeMethod")
+USER_KEYS = ("maxParallel", "workerNotes", "offerBareLayout", "autoMergeRisk", "mergeMethod",
+             "autoCleanup")
 
 def fail(message):
     print(f"worktree: {message}", file=sys.stderr)
@@ -468,6 +477,14 @@ def risk_levels():
 auto_merge_risk = risk_levels()
 merge_method = choice("mergeMethod", "SOP_MERGE_METHOD", env_merge_method,
                       ("squash", "merge", "rebase"), "squash")
+if env_auto_cleanup:
+    if env_auto_cleanup not in ("0", "1"):
+        fail(f"SOP_AUTO_CLEANUP must be 0 or 1 (got '{env_auto_cleanup}')")
+    auto_cleanup = env_auto_cleanup == "1"
+else:
+    auto_cleanup = data.get("autoCleanup", True)
+    if not isinstance(auto_cleanup, bool):
+        fail(f"autoCleanup must be true or false (got {json.dumps(auto_cleanup)} from {origin['autoCleanup']})")
 offer_bare = layout == "standard" and data.get("offerBareLayout", True) is not False
 print(json.dumps({
     "config_file": config or None,
@@ -495,6 +512,7 @@ print(json.dumps({
     "offer_bare_migration": offer_bare,
     "auto_merge_risk": auto_merge_risk,
     "merge_method": merge_method,
+    "auto_cleanup": auto_cleanup,
 }, ensure_ascii=False, indent=2))
 PY
 }
@@ -571,10 +589,11 @@ cmd_integrate() {
 }
 
 cmd_remove() {
-  local name="" prefix=$BRANCH_PREFIX force=0 branch path dirty
+  local name="" prefix=$BRANCH_PREFIX force=0 pr_merged=0 branch path dirty
   while (($#)); do
     case $1 in
       --force) force=1; shift ;;
+      --pr-merged) pr_merged=1; shift ;;
       --stage)
         [[ $# -ge 2 && -z $name ]] || die "usage: remove <slug> | remove --stage <id>"
         prefix=$STAGE_PREFIX name=$2; shift 2 ;;
@@ -601,6 +620,9 @@ cmd_remove() {
   # -d (not -D): only deletes when merged into the current HEAD.
   if git branch -d "$branch" >/dev/null 2>&1; then
     printf 'deleted merged branch: %s\n' "$branch" >&2
+  elif ((pr_merged)) && git branch -D "$branch" >/dev/null 2>&1; then
+    # A squash or rebase merge leaves no trace of the branch in HEAD; the caller checked the PR.
+    printf 'deleted branch (PR merged): %s\n' "$branch" >&2
   elif [[ $prefix == "$STAGE_PREFIX" &&
           -z $(git rev-list --no-merges "refs/heads/$branch" --not --exclude="$branch" --branches) ]] &&
        git branch -D "$branch" >/dev/null 2>&1; then
@@ -707,6 +729,36 @@ cmd_rundir() {
     "$(json_escape "$dir/logs")" "$([[ -f $dir/state.json ]] && echo true || echo false)"
 }
 
+# Fast-forwards the source worktree's branch to its upstream (origin/<branch> without one).
+# Skips (exit 1, nothing changed) on a detached HEAD, tracked changes, no upstream, a failed
+# fetch, or local commits the upstream lacks.
+cmd_sync() {
+  (($# == 0)) || die "sync takes no arguments"
+  local src=$SOURCE_WORKTREE branch remote merge_ref upstream from to
+  skip() {
+    printf '{"synced":false,"worktree":"%s","branch":"%s","reason":"%s"}\n' \
+      "$(json_escape "$src")" "$(json_escape "${branch:-}")" "$(json_escape "$1")"
+    exit 1
+  }
+  [[ -n $src ]] || skip "no source worktree"
+  branch=$(git -C "$src" symbolic-ref --quiet --short HEAD) || skip "detached HEAD"
+  [[ -z $(git -C "$src" status --porcelain --untracked-files=no) ]] || skip "uncommitted changes"
+  remote=$(git -C "$src" config "branch.$branch.remote" || echo origin)
+  merge_ref=$(git -C "$src" config "branch.$branch.merge" || echo "refs/heads/$branch")
+  git -C "$src" remote get-url "$remote" >/dev/null 2>&1 || skip "no '$remote' remote"
+  git -C "$src" fetch --quiet "$remote" "${merge_ref#refs/heads/}" >&2 2>&1 ||
+    skip "cannot fetch $remote/${merge_ref#refs/heads/}"
+  upstream=refs/remotes/$remote/${merge_ref#refs/heads/}
+  git -C "$src" rev-parse --verify --quiet "$upstream" >/dev/null || upstream=FETCH_HEAD
+  from=$(git -C "$src" rev-parse HEAD)
+  git -C "$src" merge-base --is-ancestor HEAD "$upstream" || skip "local commits not on $remote"
+  git -C "$src" merge --ff-only --quiet "$upstream" >&2 2>&1 || skip "fast-forward failed"
+  to=$(git -C "$src" rev-parse HEAD)
+  printf '{"synced":true,"worktree":"%s","branch":"%s","from":"%s","to":"%s","updated":%s}\n' \
+    "$(json_escape "$src")" "$(json_escape "$branch")" "$from" "$to" \
+    "$([[ $from == "$to" ]] && echo false || echo true)"
+}
+
 usage() {
   # Prints the header comment up to the first non-comment line; $1 = max lines (0 = all).
   awk -v max="${1:-0}" 'NR == 1 { next } !/^#/ { exit } { sub(/^# ?/, ""); print; if (max && NR > max) exit }' "$0"
@@ -731,6 +783,7 @@ main() {
     status) cmd_status "$@" ;;
     provision) cmd_provision "$@" ;;
     rundir) cmd_rundir "$@" ;;
+    sync)   cmd_sync "$@" ;;
     *) die "unknown command: $cmd" ;;
   esac
 }
